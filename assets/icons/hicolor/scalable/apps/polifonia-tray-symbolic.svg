@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
+  <!-- Polifonia Monochrome Symbolic Tray Icon - Studio Driver Core & Orbital Matrix (3B-2) -->
+  <!-- Outer Soundstage Orbit -->
+  <circle cx="12" cy="12" r="8.8" fill="none" stroke="#ffffff" stroke-width="1.6"/>
+
+  <!-- Phase Alignment Rays -->
+  <line x1="4.4" y1="7.6" x2="8.8" y2="10.2" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="19.6" y1="7.6" x2="15.2" y2="10.2" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="12" y1="20.8" x2="12" y2="15.8" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+
+  <!-- Center Hollow Speaker Cone + Center Pupil -->
+  <circle cx="12" cy="12" r="3.6" fill="none" stroke="#ffffff" stroke-width="1.6"/>
+  <circle cx="12" cy="12" r="1.5" fill="#ffffff"/>
+
+  <!-- 3 Physical Speaker Destination Nodes -->
+  <circle cx="4.4" cy="7.6" r="2.2" fill="#ffffff"/>
+  <circle cx="19.6" cy="7.6" r="2.2" fill="#ffffff"/>
+  <circle cx="12" cy="20.8" r="2.6" fill="#ffffff"/>
+</svg>

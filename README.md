@@ -1,42 +1,50 @@
-# Polifonia Audio Studio 🎵
+<p align="center">
+  <img src="assets/io.polifonia.AudioStudio.svg" width="130" height="130" alt="Polifonia Audio Studio Logo">
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%28PipeWire%29-orange.svg)](https://pipewire.org)
-[![Python Version](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](https://www.python.org/)
-[![Packaging](https://img.shields.io/badge/Packages-Flatpak%20%7C%20AppImage%20%7C%20DEB%20%7C%20RPM-purple.svg)](#-packaging--distribution)
+<h1 align="center">Polifonia Audio Studio</h1>
 
-**Polifonia Audio Studio** is an advanced, PipeWire-native multi-speaker audio compositing and acoustic DSP management system for the Linux desktop (compatible with **GNOME**, **KDE Plasma**, **XFCE**, **Cinnamon**, **Hyprland**, and **Sway**).
+<p align="center">
+  <strong>Professional Cross-Desktop Multi-Speaker & Multi-Monitor Audio Unison Engine for Linux (PipeWire)</strong>
+</p>
 
-It enables workstations with heterogeneous multi-monitor setups (HDMI/DisplayPort integrated screen speakers, USB audio DACs, auxiliary subwoofers, and analog outputs) to aggregate disparate physical outputs into a unified, phase-aligned, frequency-filtered **2.1 / Multichannel Virtual Soundstage**.
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://pipewire.org"><img src="https://img.shields.io/badge/Platform-Linux%20%28PipeWire%29-orange.svg" alt="Platform: Linux PipeWire"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg" alt="Python 3.10+"></a>
+  <a href="#packaging--distribution"><img src="https://img.shields.io/badge/Packages-Flatpak%20%7C%20AppImage%20%7C%20DEB%20%7C%20RPM-purple.svg" alt="Packages"></a>
+</p>
 
 ---
 
-## 📑 Table of Contents
+**Polifonia Audio Studio** is an advanced, PipeWire-native multi-speaker audio compositing and acoustic DSP management system for the Linux desktop (compatible with **GNOME**, **KDE Plasma**, **XFCE**, **Cinnamon**, **Hyprland**, and **Sway**).
 
-- [Overview & Problem Statement](#-overview--problem-statement)
-- [Architecture & System Design](#-architecture--system-design)
+It enables workstations with heterogeneous multi-monitor setups (HDMI/DisplayPort integrated screen speakers, USB audio DACs, auxiliary subwoofers, and analog outputs) to aggregate disparate physical outputs into a unified, phase-aligned, frequency-filtered **Multichannel Virtual Soundstage**.
+
+---
+
+## Table of Contents
+
+- [Overview & Problem Statement](#overview--problem-statement)
+- [Architecture & System Design](#architecture--system-design)
   - [Hardware-Agnostic Dynamic Discovery](#1-hardware-agnostic-dynamic-discovery)
   - [Seamless Real-Time Unison Engine](#2-seamless-real-time-unison-engine)
   - [Custom Cross-Desktop UI Theme](#3-custom-cross-desktop-ui-theme)
-- [Technical DSP & Acoustic Capabilities](#-technical-dsp--acoustic-capabilities)
+- [Technical Capabilities](#technical-capabilities)
   - [Dynamic Multi-Sink Routing](#1-dynamic-multi-sink-routing)
-  - [Active 2.1 Crossover Filtering](#2-active-21-crossover-filtering)
-  - [Time Alignment & Delay Compensation](#3-time-alignment--delay-compensation)
-  - [Per-Channel Gain & Polarity Calibration](#4-per-channel-gain--polarity-calibration)
-  - [Embedded Synthetic Acoustic Test Generator](#5-embedded-synthetic-acoustic-test-generator)
-- [Installation & Quick Start](#-installation--quick-start)
-- [Packaging & Distribution](#-packaging--distribution)
+  - [Time Alignment & Delay Compensation](#2-time-alignment--delay-compensation)
+- [Installation & Quick Start](#installation--quick-start)
+- [Packaging & Distribution](#packaging--distribution)
   - [Flatpak (Flathub)](#1-flatpak-flathub)
   - [AppImage](#2-appimage)
   - [Debian / Ubuntu (.deb)](#3-debian--ubuntu-deb)
   - [Fedora / RHEL / openSUSE (.rpm)](#4-fedora--rhel--opensuse-rpm)
-- [Running Automated Tests](#-running-automated-tests)
-- [Configuration & Storage Specification](#-configuration--storage-specification)
-- [License](#-license)
+- [Running Automated Tests](#running-automated-tests)
+- [License](#license)
 
 ---
 
-## 🔬 Overview & Problem Statement
+## Overview & Problem Statement
 
 Modern multi-monitor workstations frequently feature integrated speakers across multiple displays (e.g. left, center and right HDMI/DisplayPort screens) alongside a dedicated auxiliary speaker or USB subwoofer. Standard Linux audio servers expose these as isolated, independent hardware sinks.
 
@@ -49,7 +57,7 @@ Polifonia solves this by providing a unified PipeWire routing layer with integra
 
 ---
 
-## 🏛 Architecture & System Design
+## Architecture & System Design
 
 ```
 polifonia/
@@ -67,9 +75,12 @@ polifonia/
 ├── ui/
 │   ├── styles/
 │   │   └── studio_theme.css   # Custom cross-desktop dark studio CSS theme
-│   └── views/
-│       ├── main_window.py     # Main application window & control bar
-│       └── speaker_row.py     # Per-speaker channel strip row widget
+│   ├── views/
+│   │   ├── main_window.py     # Main application window & control bar
+│   │   └── speaker_card.py    # Per-speaker channel strip row widget
+│   └── tray/
+│       ├── tray_service.py    # Tray manager
+│       └── tray_indicator.py  # System tray indicator process
 ├── packaging/
 │   ├── flatpak/               # Flathub manifest (io.polifonia.AudioStudio.json)
 │   ├── appimage/              # AppImage AppRun and build script
@@ -98,7 +109,7 @@ polifonia/
 
 ---
 
-## 🎛 Technical DSP & Acoustic Capabilities
+## Technical Capabilities
 
 ### 1. Dynamic Multi-Sink Routing
 Polifonia deploys dedicated PipeWire loopback nodes linked to designated physical hardware sinks:
@@ -122,7 +133,7 @@ Where $c \approx 343\text{ m/s}$ (speed of sound in air). A distance delta of $1
 
 ---
 
-## 🚀 Installation & Quick Start
+## Installation & Quick Start
 
 ### Prerequisites
 - Linux Kernel 5.15+
@@ -155,7 +166,7 @@ polifonia
 
 ---
 
-## 📦 Packaging & Distribution
+## Packaging & Distribution
 
 Polifonia provides ready-to-use configurations for all major Linux distribution channels:
 
@@ -184,7 +195,7 @@ rpmbuild -ba packaging/rpm/polifonia.spec
 
 ---
 
-## 🧪 Running Automated Tests
+## Running Automated Tests
 
 Run the complete 38-test automated suite:
 ```bash
@@ -193,6 +204,6 @@ python3 -m unittest discover tests
 
 ---
 
-## 📄 License
+## License
 
 Distributed under the **MIT License**. See [LICENSE](file:///home/ntm/Develop/Taoshan/polifonia/LICENSE) for details.

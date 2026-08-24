@@ -102,14 +102,34 @@ class TestUI(unittest.TestCase):
         win._on_toggle_unison_clicked(None)
         self.assertTrue(win.config.is_active)
         mock_audio_service.activate_unison.assert_called_with(win.config)
-        self.assertIn("DEACTIVATE", win.master_toggle_btn.get_label())
+        self.assertIn("DEACTIVATE", win.master_toggle_label.get_text())
 
         # Toggle Unison Deactivation
         mock_audio_service.is_running.return_value = False
         win._on_toggle_unison_clicked(None)
         self.assertFalse(win.config.is_active)
         mock_audio_service.deactivate_unison.assert_called()
-        self.assertIn("ACTIVATE UNISON", win.master_toggle_btn.get_label())
+        self.assertIn("ACTIVATE UNISON", win.master_toggle_label.get_text())
+
+        # Test Tray Destination Controls
+        channels = win._serialize_channels_for_tray()
+        self.assertEqual(len(channels), 3)
+
+        # Toggle enable via tray
+        win._on_tray_toggle_channel_enable("alsa_output.pci.hdmi1", True)
+        self.assertNotEqual(win.config.channels[0].role, SpeakerRole.EXCLUDED)
+
+        # Toggle disable via tray
+        win._on_tray_toggle_channel_enable("alsa_output.pci.hdmi1", False)
+        self.assertEqual(win.config.channels[0].role, SpeakerRole.EXCLUDED)
+
+        # Change role via tray
+        win._on_tray_set_channel_role("alsa_output.pci.hdmi1", "SUBWOOFER")
+        self.assertEqual(win.config.channels[0].role, SpeakerRole.SUBWOOFER)
+
+        # Change channel volume via tray
+        win._on_tray_set_channel_volume("alsa_output.pci.hdmi1", 0.75)
+        self.assertEqual(win.config.channels[0].volume_gain, 0.75)
 
 
 if __name__ == "__main__":

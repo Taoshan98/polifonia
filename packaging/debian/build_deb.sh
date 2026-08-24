@@ -37,9 +37,10 @@ exec python3 /usr/lib/polifonia/main.py "$@"
 EOF
 chmod 755 "${PKG_DIR}/usr/bin/polifonia"
 
-# Copy desktop launcher and icon
+# Copy desktop launcher and icons
 cp "${ROOT_DIR}/io.polifonia.AudioStudio.desktop" "${PKG_DIR}/usr/share/applications/"
 cp "${ROOT_DIR}/assets/io.polifonia.AudioStudio.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
+cp "${ROOT_DIR}/assets/io.polifonia.AudioStudio-symbolic.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
 cp "${ROOT_DIR}/README.md" "${PKG_DIR}/usr/share/doc/polifonia/"
 cp "${ROOT_DIR}/LICENSE" "${PKG_DIR}/usr/share/doc/polifonia/copyright"
 
