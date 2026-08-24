@@ -1,9 +1,8 @@
-"""Main GTK4 / Libadwaita Application Window."""
-
+import os
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Gio
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 from services.audio_service import AudioService
 from storage.preset_manager import PresetManager
 from core.models import SystemConfig, SpeakerRole, SpeakerConfig
@@ -14,6 +13,19 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app, audio_service: AudioService, preset_manager: PresetManager):
         super().__init__(application=app, title="Polifonia Audio Studio")
         self.set_default_size(750, 800)
+
+        # Load Custom Cross-Desktop Studio Theme
+        css_provider = Gtk.CssProvider()
+        css_path = os.path.join(os.path.dirname(__file__), "..", "styles", "studio_theme.css")
+        if os.path.exists(css_path):
+            css_provider.load_from_path(css_path)
+            display = Gdk.Display.get_default()
+            if display:
+                Gtk.StyleContext.add_provider_for_display(
+                    display,
+                    css_provider,
+                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+                )
 
         self.audio_service = audio_service
         self.preset_manager = preset_manager

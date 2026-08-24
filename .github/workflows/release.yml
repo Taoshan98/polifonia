@@ -1,0 +1,85 @@
+name: Build & Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-packages:
+    name: Build Multi-Format Packages
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-gi \
+            gir1.2-gtk-4.0 \
+            gir1.2-adw-1 \
+            libgirepository1.0-dev \
+            libfuse2 \
+            file \
+            wget \
+            dpkg-dev
+
+      - name: Build Python Wheel & Source Dist
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+          python -m build
+          mkdir -p dist/packages
+          cp dist/*.whl dist/*.tar.gz dist/packages/
+
+      - name: Build Debian Package (.deb)
+        run: |
+          chmod +x packaging/debian/build_deb.sh
+          ./packaging/debian/build_deb.sh
+          mv *.deb dist/packages/
+
+      - name: Build AppImage (.AppImage)
+        run: |
+          chmod +x packaging/appimage/build_appimage.sh
+          ./packaging/appimage/build_appimage.sh
+          
+          # Download appimagetool
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          
+          # Build final AppImage
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run build/AppDir dist/packages/Polifonia-x86_64.AppImage
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/packages/*
+
+      - name: Create GitHub Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.release_tag != ''
+        with:
+          tag_name: ${{ github.ref_name || github.event.inputs.release_tag }}
+          name: Polifonia Audio Studio ${{ github.ref_name || github.event.inputs.release_tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/packages/*

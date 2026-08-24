@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polifonia-audio"
+version = "1.0.0"
+description = "Professional Cross-Desktop Multi-Speaker & Multi-Monitor Audio Unison Engine for Linux (PipeWire)"
+readme = "README.md"
+authors = [{ name = "Polifonia Contributors" }]
+license = { text = "MIT" }
+keywords = ["audio", "pipewire", "surround", "sound", "linux", "multi-speaker", "crossover", "unison"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Mixers",
+    "Topic :: Multimedia :: Sound/Audio :: Sound Synthesis",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "PyGObject>=3.42.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/taoshan/polifonia"
+"Bug Tracker" = "https://github.com/taoshan/polifonia/issues"
+
+[project.scripts]
+polifonia = "main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "backend*", "services*", "storage*", "ui*"]
+
+[tool.setuptools.package-data]
+"ui" = ["styles/*.css"]

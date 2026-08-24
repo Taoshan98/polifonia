@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Polifonia Audio Studio
+GenericName=Multi-Speaker Audio Studio
+Comment=Broadcast and calibrate simultaneous audio across multiple monitors, speakers and DACs via PipeWire
+Exec=polifonia
+Icon=io.polifonia.AudioStudio
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Mixer;Player;GTK;
+Keywords=Audio;Sound;PipeWire;Speakers;Unison;Crossover;Delay;Studio;
+StartupNotify=true
+StartupWMClass=io.polifonia.AudioStudio

@@ -1,0 +1,32 @@
+{
+  "app-id": "io.polifonia.AudioStudio",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "46",
+  "sdk": "org.gnome.Sdk",
+  "command": "polifonia",
+  "finish-args": [
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--socket=pulseaudio",
+    "--filesystem=xdg-config/polifonia:create",
+    "--device=all"
+  ],
+  "modules": [
+    {
+      "name": "polifonia",
+      "buildsystem": "simple",
+      "build-commands": [
+        "pip3 install --no-index --find-links=\"file://${PWD}\" --prefix=${FLATPAK_DEST} .",
+        "install -Dm644 io.polifonia.AudioStudio.desktop ${FLATPAK_DEST}/share/applications/io.polifonia.AudioStudio.desktop",
+        "install -Dm644 assets/io.polifonia.AudioStudio.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.polifonia.AudioStudio.svg"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "../.."
+        }
+      ]
+    }
+  ]
+}

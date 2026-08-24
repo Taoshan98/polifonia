@@ -22,21 +22,63 @@ class DeviceScanner:
         return None
 
     @staticmethod
+    def get_eld_monitors() -> dict:
+        """Dynamically parses kernel ALSA ELD files for all sound cards and connected video displays."""
+        import glob
+        eld_map = {}  # card_id -> list of dict(name, conn_type, pin)
+        for eld_path in glob.glob("/proc/asound/card*/eld*"):
+            try:
+                with open(eld_path, "r") as f:
+                    content = f.read()
+                if "monitor_present\t1" in content or "monitor_present\t\t1" in content or "monitor_present 1" in content:
+                    m_name = re.search(r"monitor_name\s+(.+)", content)
+                    conn = re.search(r"connection_type\s+(.+)", content)
+                    name = m_name.group(1).strip() if m_name else "Display Audio"
+                    conn_type = conn.group(1).strip() if conn else "HDMI"
+
+                    c_match = re.search(r"card(\d+)", eld_path)
+                    p_match = re.search(r"eld#\d+\.(\d+)", eld_path)
+                    if c_match:
+                        c_id = int(c_match.group(1))
+                        pin_id = int(p_match.group(1)) if p_match else 0
+                        eld_map.setdefault(c_id, []).append({
+                            "name": name,
+                            "connection": conn_type,
+                            "pin": pin_id
+                        })
+            except Exception:
+                pass
+        return eld_map
+
+    @staticmethod
     def ensure_multimonitor_card_profiles():
-        """Ensures HDMI/DP multi-head graphics cards are set to pro-audio profile to expose all monitors."""
+        """
+        Dynamically detects any multi-output graphics card (NVIDIA, AMD Radeon, Intel Arc)
+        and sets its profile to pro-audio so all physical monitors are exposed as independent audio sinks.
+        """
         try:
-            res = subprocess.run(["pactl", "list", "cards", "short"], capture_output=True, text=True)
-            for line in res.stdout.splitlines():
-                if "01_00.1" in line or "NVidia" in line:
-                    card_name = line.split()[1]
-                    subprocess.run(["pactl", "set-card-profile", card_name, "pro-audio"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            res = subprocess.run(["pactl", "list", "cards"], capture_output=True, text=True)
+            cards = res.stdout.split("Card #")
+            for card_block in cards:
+                if not card_block.strip():
+                    continue
+                c_name_match = re.search(r"Name:\s+(\S+)", card_block)
+                if not c_name_match:
+                    continue
+                card_name = c_name_match.group(1)
+                # If card has multi-HDMI/DP capabilities and supports pro-audio profile
+                if "pro-audio:" in card_block and "hdmi-output-" in card_block:
+                    if "Active Profile: pro-audio" not in card_block:
+                        subprocess.run(["pactl", "set-card-profile", card_name, "pro-audio"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
     @classmethod
     def scan_sinks(cls) -> List[AudioSink]:
-        """Scans PipeWire graph for active audio sinks excluding Polifonia virtual nodes."""
+        """Scans PipeWire graph for active audio sinks with generic, dynamic hardware classification."""
         cls.ensure_multimonitor_card_profiles()
+        eld_map = cls.get_eld_monitors()
         sinks = []
         try:
             output = subprocess.check_output(["pw-dump"], text=True)
@@ -59,48 +101,63 @@ class DeviceScanner:
             if "polifonia" in name.lower() or "filter-chain" in name.lower():
                 continue
 
-            # Ignore disconnected Pro-Audio outputs or phantom endpoints
-            if "pro-output-9" in name:
-                continue
-            if "HiFi__HDMI" in name:
-                # Intel phantom ports without connected monitor
-                continue
-
             node_id = obj.get("id")
+            card_id = props.get("alsa.card")
+            device_id = props.get("alsa.device")
             raw_desc = (
                 props.get("node.nick") or 
                 props.get("node.description") or 
                 props.get("device.description") or 
                 name
             )
-
-            desc_lower = raw_desc.lower()
+            bus = props.get("device.bus", "").lower()
+            form_factor = props.get("device.form-factor", "").lower()
+            raw_desc_lower = raw_desc.lower()
             name_lower = name.lower()
 
-            # Accurate hardware monitor model assignment from ELD/EDID
-            if "pro-output-3" in name_lower or "01_00.1.hdmi" in name_lower:
-                description = "Monitor Samsung Odyssey G61SD (HDMI / Cassa AUX)"
-            elif "pro-output-7" in name_lower:
-                description = "Monitor BenQ EW2480 (DisplayPort 1)"
-            elif "pro-output-8" in name_lower:
-                description = "Monitor BenQ EW2480 (DisplayPort 2)"
-            elif "smi" in desc_lower or "silicon_motion" in name_lower:
-                description = "Monitor USB Display (Adattatore SMI)"
-            elif "speaker" in desc_lower or "hifi__speaker" in name_lower:
-                description = "Altoparlanti Integrati (Laptop Speaker)"
+            # Dynamic Classification
+            is_internal = False
+            is_digital_hdmi = "hdmi" in name_lower or "pro-output" in name_lower or "iec958" in name_lower
+
+            if is_digital_hdmi:
+                c_num = int(card_id) if card_id is not None else None
+                if c_num is not None and c_num in eld_map:
+                    monitors = eld_map[c_num]
+                    # Map device index to connected monitor
+                    d_num = int(device_id) if device_id is not None else 0
+                    m_idx = 0
+                    if d_num == 3:
+                        m_idx = 0
+                    elif d_num == 7:
+                        m_idx = 1
+                    elif d_num == 8:
+                        m_idx = 2
+                    elif d_num < len(monitors):
+                        m_idx = d_num
+
+                    if m_idx < len(monitors):
+                        mon = monitors[m_idx]
+                        description = f"Monitor {mon['name']} ({mon['connection']})"
+                    else:
+                        # Unconnected/phantom HDMI port
+                        continue
+                else:
+                    # Unconnected HDMI/DP port on card without active ELD
+                    continue
+            elif "speaker" in raw_desc_lower or "speaker" in name_lower or form_factor == "internal":
+                description = "Altoparlanti Integrati (Speakers)"
+                is_internal = True
+            elif "headphone" in raw_desc_lower or "headphone" in name_lower:
+                clean_name = props.get("node.nick") or props.get("device.product.name") or "Analog"
+                description = f"Cuffie / Uscita Audio ({clean_name})"
+            elif bus == "usb" or "usb" in name_lower:
+                clean_name = props.get("node.nick") or props.get("device.product.name") or raw_desc.replace("Stereo analogico", "").strip()
+                description = f"Audio USB ({clean_name})"
+            elif bus == "bluetooth" or "bluez" in name_lower:
+                clean_name = props.get("node.nick") or props.get("device.product.name") or "Bluetooth Device"
+                description = f"Audio Bluetooth ({clean_name})"
             else:
                 description = raw_desc
-
-            # Detect if it's the laptop's internal speakers
-            is_internal = False
-            form_factor = props.get("device.form-factor", "").lower()
-            bus = props.get("device.bus", "").lower()
-
-            if "speaker" in desc_lower or "internal" in desc_lower or "built-in" in desc_lower or "laptop" in desc_lower:
-                if "pci" in bus or "alc" in name_lower or "hda" in name_lower or "alder" in desc_lower or "speaker" in name_lower:
-                    is_internal = True
-            if form_factor == "internal":
-                is_internal = True
 
             sink = AudioSink(
                 id=node_id,

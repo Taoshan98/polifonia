@@ -42,8 +42,10 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
                 "info": {
                     "props": {
                         "media.class": "Audio/Sink",
-                        "node.name": "alsa_output.pci-0000_01_00.1.pro-output-3",
-                        "node.description": "GA107 High Definition Audio Controller Pro",
+                        "node.name": "alsa_output.pci-gpu.pro-output-3",
+                        "node.description": "GPU High Definition Audio Controller Pro",
+                        "alsa.card": 0,
+                        "alsa.device": 3,
                         "device.bus": "pci"
                     }
                 }
@@ -107,7 +109,10 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
             }
         ]
 
+        mock_eld = {0: [{"name": "LG UltraGear 4K", "connection": "HDMI", "pin": 0}]}
+
         with patch("subprocess.check_output") as mock_pw, \
+             patch.object(DeviceScanner, "get_eld_monitors", return_value=mock_eld), \
              patch("subprocess.run") as mock_run:
             mock_pw.return_value = json.dumps(mock_pw_dump)
             sinks = DeviceScanner.scan_sinks()
@@ -118,17 +123,18 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
 
             # Check HDMI Sink
             self.assertIn(44, sink_map)
-            self.assertEqual(sink_map[44].name, "alsa_output.pci-0000_01_00.1.pro-output-3")
-            self.assertIn("Odyssey", sink_map[44].description)
+            self.assertEqual(sink_map[44].name, "alsa_output.pci-gpu.pro-output-3")
+            self.assertEqual(sink_map[44].description, "Monitor LG UltraGear 4K (HDMI)")
             self.assertFalse(sink_map[44].is_internal)
 
             # Check USB Sink
             self.assertIn(88, sink_map)
-            self.assertEqual(sink_map[88].description, "USB Subwoofer DAC")
+            self.assertEqual(sink_map[88].description, "Audio USB (USB Subwoofer DAC)")
             self.assertFalse(sink_map[88].is_internal)
 
             # Check Internal Laptop Speaker
             self.assertIn(99, sink_map)
+            self.assertEqual(sink_map[99].description, "Altoparlanti Integrati (Speakers)")
             self.assertTrue(sink_map[99].is_internal)
 
             # Ensure virtual node 105 and source node 110 are not present

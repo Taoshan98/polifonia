@@ -1,0 +1,25 @@
+# Maintainer: Polifonia Contributors <info@polifonia.io>
+pkgname=polifonia
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Professional Multi-Speaker & Multi-Monitor Audio Unison Engine for Linux (PipeWire)"
+arch=('any')
+url="https://github.com/taoshan/polifonia"
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'libadwaita' 'pipewire' 'pipewire-pulse' 'wireplumber')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    python -m installer --destdir="$pkgdir" dist/*.whl
+    install -Dm644 io.polifonia.AudioStudio.desktop "$pkgdir/usr/share/applications/io.polifonia.AudioStudio.desktop"
+    install -Dm644 assets/io.polifonia.AudioStudio.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.polifonia.AudioStudio.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

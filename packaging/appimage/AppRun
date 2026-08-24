@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+# AppRun script for Polifonia AppImage
+SELF=$(readlink -f "$0")
+HERE=${SELF%/*}
+
+export PATH="${HERE}/usr/bin:${PATH}"
+export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/lib64:${LD_LIBRARY_PATH}"
+export PYTHONPATH="${HERE}/usr/lib/python3/dist-packages:${HERE}/usr/lib/python3/site-packages:${HERE}:${PYTHONPATH}"
+export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export GSK_RENDERER="gl"
+
+exec "${HERE}/usr/bin/python3" "${HERE}/main.py" "$@"

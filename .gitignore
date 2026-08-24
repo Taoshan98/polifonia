@@ -9,6 +9,11 @@ venv/
 build/
 dist/
 *.egg-info/
+*.deb
+*.AppImage
+*.rpm
+*.tar.gz
+*.whl
 .DS_Store
 .idea/
 .vscode/
