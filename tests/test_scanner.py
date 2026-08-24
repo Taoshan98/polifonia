@@ -42,8 +42,8 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
                 "info": {
                     "props": {
                         "media.class": "Audio/Sink",
-                        "node.name": "alsa_output.pci-0000_00_1f.3.HiFi__HDMI1__sink",
-                        "node.description": "HDMI 1 Display Audio",
+                        "node.name": "alsa_output.pci-0000_01_00.1.pro-output-3",
+                        "node.description": "GA107 High Definition Audio Controller Pro",
                         "device.bus": "pci"
                     }
                 }
@@ -107,7 +107,8 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
             }
         ]
 
-        with patch("subprocess.check_output") as mock_pw:
+        with patch("subprocess.check_output") as mock_pw, \
+             patch("subprocess.run") as mock_run:
             mock_pw.return_value = json.dumps(mock_pw_dump)
             sinks = DeviceScanner.scan_sinks()
 
@@ -117,8 +118,8 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
 
             # Check HDMI Sink
             self.assertIn(44, sink_map)
-            self.assertEqual(sink_map[44].name, "alsa_output.pci-0000_00_1f.3.HiFi__HDMI1__sink")
-            self.assertEqual(sink_map[44].description, "HDMI 1 Display Audio")
+            self.assertEqual(sink_map[44].name, "alsa_output.pci-0000_01_00.1.pro-output-3")
+            self.assertIn("Odyssey", sink_map[44].description)
             self.assertFalse(sink_map[44].is_internal)
 
             # Check USB Sink

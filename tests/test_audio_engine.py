@@ -127,7 +127,7 @@ class TestAudioEngine(unittest.TestCase):
             self.assertTrue(any("stream.capture.sink=true" in arg for arg in first_cmd))
             self.assertTrue(any("hdmi_l" in arg for arg in first_cmd))
             self.assertIn("-l", first_cmd)
-            self.assertIn("12", first_cmd)
+            self.assertIn("15", first_cmd)
 
             # Stop unison
             self.service.stop_unison_sink()

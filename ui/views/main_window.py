@@ -168,7 +168,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_config_changed(self):
         self.preset_manager.save_config(self.config)
         if self.config.is_active or self.audio_service.is_running():
-            self.audio_service.activate_unison(self.config)
+            self.audio_service.sync_active_branches()
 
     def _on_crossover_toggled(self, row, param):
         self.config.crossover.enabled = row.get_active()

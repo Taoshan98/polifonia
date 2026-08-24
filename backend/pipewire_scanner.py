@@ -21,9 +21,22 @@ class DeviceScanner:
             pass
         return None
 
+    @staticmethod
+    def ensure_multimonitor_card_profiles():
+        """Ensures HDMI/DP multi-head graphics cards are set to pro-audio profile to expose all monitors."""
+        try:
+            res = subprocess.run(["pactl", "list", "cards", "short"], capture_output=True, text=True)
+            for line in res.stdout.splitlines():
+                if "01_00.1" in line or "NVidia" in line:
+                    card_name = line.split()[1]
+                    subprocess.run(["pactl", "set-card-profile", card_name, "pro-audio"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
     @classmethod
     def scan_sinks(cls) -> List[AudioSink]:
         """Scans PipeWire graph for active audio sinks excluding Polifonia virtual nodes."""
+        cls.ensure_multimonitor_card_profiles()
         sinks = []
         try:
             output = subprocess.check_output(["pw-dump"], text=True)
@@ -46,8 +59,14 @@ class DeviceScanner:
             if "polifonia" in name.lower() or "filter-chain" in name.lower():
                 continue
 
+            # Ignore disconnected Pro-Audio outputs or phantom endpoints
+            if "pro-output-9" in name:
+                continue
+            if "HiFi__HDMI" in name:
+                # Intel phantom ports without connected monitor
+                continue
+
             node_id = obj.get("id")
-            # Build clean, user-friendly description
             raw_desc = (
                 props.get("node.nick") or 
                 props.get("node.description") or 
@@ -58,21 +77,17 @@ class DeviceScanner:
             desc_lower = raw_desc.lower()
             name_lower = name.lower()
 
-            if "ga107" in desc_lower or "nvidia" in desc_lower or "arzopa" in desc_lower or "01_00.1.hdmi" in name_lower:
-                description = "Monitor HDMI (ARZOPA / NVIDIA)"
+            # Accurate hardware monitor model assignment from ELD/EDID
+            if "pro-output-3" in name_lower or "01_00.1.hdmi" in name_lower:
+                description = "Monitor Samsung Odyssey G61SD (HDMI / Cassa AUX)"
+            elif "pro-output-7" in name_lower:
+                description = "Monitor BenQ EW2480 (DisplayPort 1)"
+            elif "pro-output-8" in name_lower:
+                description = "Monitor BenQ EW2480 (DisplayPort 2)"
             elif "smi" in desc_lower or "silicon_motion" in name_lower:
-                description = "Monitor USB Display (SMI Audio)"
-            elif "alder lake" in desc_lower:
-                if "speaker" in desc_lower or "hifi__speaker" in name_lower:
-                    description = "Altoparlanti Integrati (Laptop)"
-                elif "hdmi3" in name_lower or "hdmi / displayport 3" in desc_lower:
-                    description = "Uscita Audio HDMI / DP 3 (Intel)"
-                elif "hdmi2" in name_lower or "hdmi / displayport 2" in desc_lower:
-                    description = "Uscita Audio HDMI / DP 2 (Intel)"
-                elif "hdmi1" in name_lower or "hdmi / displayport 1" in desc_lower:
-                    description = "Uscita Audio HDMI / DP 1 (Intel)"
-                else:
-                    description = raw_desc
+                description = "Monitor USB Display (Adattatore SMI)"
+            elif "speaker" in desc_lower or "hifi__speaker" in name_lower:
+                description = "Altoparlanti Integrati (Laptop Speaker)"
             else:
                 description = raw_desc
 
