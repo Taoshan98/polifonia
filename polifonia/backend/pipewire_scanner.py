@@ -77,3 +77,6 @@ class DeviceScanner:
             sinks.append(sink)
 
         return sinks
+
+# Alias
+PipeWireScanner = DeviceScanner

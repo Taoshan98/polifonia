@@ -92,3 +92,7 @@ class SystemConfig:
             speakers=speakers,
             auto_start=bool(data.get("auto_start", False))
         )
+
+# Aliases
+SpeakerChannel = SpeakerConfig
+SinkDevice = AudioSink

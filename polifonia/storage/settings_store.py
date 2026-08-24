@@ -50,7 +50,11 @@ class StorageService:
         with open(target, "r", encoding="utf-8") as f:
             return SystemConfig.from_dict(json.load(f))
 
-# Backward compatibility alias
-ProfileStorageService = StorageService
+    def load(self) -> SystemConfig:
+        return self.load_active_profile()
 
+    def save(self, config: SystemConfig) -> None:
+        self.save_profile(config)
+
+ProfileStorageService = StorageService
 SettingsStore = StorageService

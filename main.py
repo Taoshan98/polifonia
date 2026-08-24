@@ -12,9 +12,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio
 
-from polifonia.backend.pipewire_client import PipewireClient
-from polifonia.services.audio_service import AudioService
-from polifonia.storage.preset_manager import PresetManager
+from polifonia.services.audio_engine import AudioEngineService
+from polifonia.storage.settings_store import SettingsStore
 from polifonia.ui.views.main_window import MainWindow
 
 
@@ -24,14 +23,13 @@ class PolifoniaApplication(Adw.Application):
             application_id="io.polifonia.AudioStudio",
             flags=Gio.ApplicationFlags.FLAGS_NONE
         )
-        self.pw_client = PipewireClient()
-        self.preset_manager = PresetManager()
-        self.audio_service = AudioService(self.pw_client)
+        self.settings_store = SettingsStore()
+        self.audio_engine = AudioEngineService()
 
     def do_activate(self):
         win = self.props.active_window
         if not win:
-            win = MainWindow(self, self.audio_service, self.preset_manager)
+            win = MainWindow(self, self.audio_engine, self.settings_store)
         win.present()
 
 
