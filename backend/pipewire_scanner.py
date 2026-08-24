@@ -47,22 +47,42 @@ class DeviceScanner:
                 continue
 
             node_id = obj.get("id")
-            description = (
+            # Build clean, user-friendly description
+            raw_desc = (
                 props.get("node.nick") or 
                 props.get("node.description") or 
                 props.get("device.description") or 
                 name
             )
 
+            desc_lower = raw_desc.lower()
+            name_lower = name.lower()
+
+            if "ga107" in desc_lower or "nvidia" in desc_lower or "arzopa" in desc_lower or "01_00.1.hdmi" in name_lower:
+                description = "Monitor HDMI (ARZOPA / NVIDIA)"
+            elif "smi" in desc_lower or "silicon_motion" in name_lower:
+                description = "Monitor USB Display (SMI Audio)"
+            elif "alder lake" in desc_lower:
+                if "speaker" in desc_lower or "hifi__speaker" in name_lower:
+                    description = "Altoparlanti Integrati (Laptop)"
+                elif "hdmi3" in name_lower or "hdmi / displayport 3" in desc_lower:
+                    description = "Uscita Audio HDMI / DP 3 (Intel)"
+                elif "hdmi2" in name_lower or "hdmi / displayport 2" in desc_lower:
+                    description = "Uscita Audio HDMI / DP 2 (Intel)"
+                elif "hdmi1" in name_lower or "hdmi / displayport 1" in desc_lower:
+                    description = "Uscita Audio HDMI / DP 1 (Intel)"
+                else:
+                    description = raw_desc
+            else:
+                description = raw_desc
+
             # Detect if it's the laptop's internal speakers
             is_internal = False
-            desc_lower = description.lower()
-            name_lower = name.lower()
             form_factor = props.get("device.form-factor", "").lower()
             bus = props.get("device.bus", "").lower()
 
             if "speaker" in desc_lower or "internal" in desc_lower or "built-in" in desc_lower or "laptop" in desc_lower:
-                if "pci" in bus or "alc" in name_lower or "hda" in name_lower or "alder" in desc_lower:
+                if "pci" in bus or "alc" in name_lower or "hda" in name_lower or "alder" in desc_lower or "speaker" in name_lower:
                     is_internal = True
             if form_factor == "internal":
                 is_internal = True

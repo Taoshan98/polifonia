@@ -7,6 +7,9 @@ import os
 # Add parent directory to path so polifonia package can be resolved
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Set GSK_RENDERER to OpenGL to avoid Mesa Intel Vulkan driver warning and ensure smooth rendering
+os.environ.setdefault("GSK_RENDERER", "gl")
+
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -21,7 +24,7 @@ class PolifoniaApplication(Adw.Application):
     def __init__(self):
         super().__init__(
             application_id="io.polifonia.AudioStudio",
-            flags=Gio.ApplicationFlags.FLAGS_NONE
+            flags=Gio.ApplicationFlags.NON_UNIQUE
         )
         self.settings_store = SettingsStore()
         self.audio_engine = AudioEngineService()

@@ -110,18 +110,24 @@ class TestAudioEngine(unittest.TestCase):
         mock_proc2 = MagicMock()
         mock_proc3 = MagicMock()
 
-        with patch("subprocess.Popen", side_effect=[mock_proc1, mock_proc2, mock_proc3]) as mock_popen:
+        with patch("subprocess.Popen", side_effect=[mock_proc1, mock_proc2, mock_proc3]) as mock_popen, \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="536870999\n", returncode=0)
+
             # Start unison
             started = self.service.start_unison_sink()
             self.assertTrue(started)
             self.assertTrue(self.service.is_running())
             self.assertEqual(mock_popen.call_count, 3)
 
-            # Inspect latency flag in loopback command
+            # Inspect loopback command flags
             first_cmd = mock_popen.call_args_list[0][0][0]
             self.assertIn("pw-loopback", first_cmd)
-            self.assertIn("--target-object=10", first_cmd)
-            self.assertIn("--latency=12/1000", first_cmd)
+            self.assertTrue(any("target.object=polifonia_master" in arg for arg in first_cmd))
+            self.assertTrue(any("stream.capture.sink=true" in arg for arg in first_cmd))
+            self.assertTrue(any("hdmi_l" in arg for arg in first_cmd))
+            self.assertIn("-l", first_cmd)
+            self.assertIn("12", first_cmd)
 
             # Stop unison
             self.service.stop_unison_sink()
@@ -130,6 +136,7 @@ class TestAudioEngine(unittest.TestCase):
             self.assertTrue(mock_proc1.terminate.called)
             self.assertTrue(mock_proc2.terminate.called)
             self.assertTrue(mock_proc3.terminate.called)
+
 
     def test_start_unison_with_no_active_speakers_returns_false(self):
         """Verify unison returns False if all channels are excluded/disabled."""

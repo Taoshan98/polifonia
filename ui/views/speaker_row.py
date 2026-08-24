@@ -105,7 +105,7 @@ class SpeakerRow(Adw.ExpanderRow):
         test_btn.set_tooltip_text("Riproduci tono di test (Beep)")
         test_btn.set_valign(Gtk.Align.CENTER)
         test_btn.add_css_class("suggested-action")
-        test_btn.connect("clicked", lambda b: self.on_test(self.channel.sink_id))
+        test_btn.connect("clicked", lambda b: self.on_test(self.channel.sink_name or self.channel.sink_id, self.channel.display_name or self.channel.sink_name))
         self.test_row.add_suffix(test_btn)
         self.add_row(self.test_row)
 
