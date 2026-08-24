@@ -103,7 +103,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Group 2: Crossover DSP & Tuning (2.1)
         dsp_group = Adw.PreferencesGroup()
-        dsp_group.set_title("Filtro Crossover & Equalizzazione (2.1)")
+        dsp_group.set_title("Filtro Crossover e Equalizzazione (2.1)")
         dsp_group.set_description(
             "Isola le basse frequenze sulla cassa aux/subwoofer e alleggerisce i monitor satelliti."
         )
@@ -132,7 +132,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Group 3: Master Control & Presets
         master_group = Adw.PreferencesGroup()
-        master_group.set_title("Controllo Generale & Predefiniti")
+        master_group.set_title("Controllo Generale e Predefiniti")
         pref_page.add(master_group)
 
         # Set as default audio output switch

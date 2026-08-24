@@ -122,7 +122,7 @@ class PipeWireConfigGenerator:
         Creates a runtime routing script using pw-loopback / filter-chain module
         that can be started as a standalone background process.
         """
-        active_channels = [c for c in system_config.speakers if c.role != SpeakerRole.DISABLED]
+        active_channels = [c for c in system_config.channels if c.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
         
         # Generates a clean python runner script for dynamic management
         lines = [
@@ -149,8 +149,9 @@ class PipeWireConfigGenerator:
             pos = "FL" if ch.role == SpeakerRole.LEFT else ("FR" if ch.role == SpeakerRole.RIGHT else "MONO")
             gain_pct = int(ch.volume_gain * 100)
             delay_samples = int(ch.delay_ms * 48) # 48kHz assumption for delay compensation
+            desc = ch.display_name or ch.sink_name
             
-            lines.append(f"# Route for {ch.sink_description} ({ch.role.value})")
+            lines.append(f"# Route for {desc} ({ch.role.value})")
             lines.append(f'p = subprocess.Popen(["pw-loopback", "--capture-props=media.class=Audio/Sink node.name=polifonia_sink_{ch.sink_id}", f"--target-object={ch.sink_id}"])')
             lines.append("processes.append(p)")
 
@@ -159,3 +160,4 @@ class PipeWireConfigGenerator:
         lines.append("    time.sleep(1)")
 
         return "\n".join(lines)
+
