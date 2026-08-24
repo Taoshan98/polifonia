@@ -4,7 +4,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
-from polifonia.core.models import SpeakerChannel, SpeakerRole
+from core.models import SpeakerChannel, SpeakerRole
 
 
 class SpeakerRow(Adw.ExpanderRow):
@@ -14,13 +14,13 @@ class SpeakerRow(Adw.ExpanderRow):
         self.on_change = on_change_callback
         self.on_test = on_test_callback
 
-        self.set_title(channel.display_name)
-        self.set_subtitle(f"ID: {channel.sink_id} | Driver: {channel.name}")
+        self.set_title(channel.display_name or channel.sink_name)
+        self.set_subtitle(f"ID: {channel.sink_id} | Driver: {channel.sink_name}")
         self.set_show_enable_switch(True)
-        self.set_enable_expansion(True)
 
         # Initial state of the switch
-        self.set_enable_expansion(channel.role != SpeakerRole.DISABLED)
+        is_active = channel.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)
+        self.set_enable_expansion(is_active)
 
         # Icon
         self._update_icon()
@@ -33,11 +33,12 @@ class SpeakerRow(Adw.ExpanderRow):
 
     def _update_icon(self):
         icon_name = "audio-speakers-symbolic"
-        if "hdmi" in self.channel.name.lower():
+        name_lower = (self.channel.sink_name or "").lower()
+        if "hdmi" in name_lower:
             icon_name = "video-display-symbolic"
-        elif "usb" in self.channel.name.lower():
+        elif "usb" in name_lower:
             icon_name = "audio-card-symbolic"
-        elif "pci" in self.channel.name.lower() or "speaker" in self.channel.name.lower():
+        elif "pci" in name_lower or "speaker" in name_lower:
             icon_name = "audio-headset-symbolic"
         self.set_icon_name(icon_name)
 
@@ -111,15 +112,17 @@ class SpeakerRow(Adw.ExpanderRow):
     def _on_enable_toggled(self, widget, param):
         enabled = self.get_enable_expansion()
         if not enabled:
-            self.channel.role = SpeakerRole.DISABLED
+            self.channel.role = SpeakerRole.EXCLUDED
         else:
             idx = self.role_row.get_selected()
-            self.channel.role = self.role_options[idx][0]
+            if 0 <= idx < len(self.role_options):
+                self.channel.role = self.role_options[idx][0]
         self.on_change()
 
     def _on_role_selected(self, widget, param):
         idx = self.role_row.get_selected()
-        self.channel.role = self.role_options[idx][0]
+        if 0 <= idx < len(self.role_options):
+            self.channel.role = self.role_options[idx][0]
         self.on_change()
 
     def _on_delay_changed(self, scale):
@@ -133,3 +136,4 @@ class SpeakerRow(Adw.ExpanderRow):
         self.channel.gain = round(val, 2)
         self.gain_row.set_subtitle(f"{int(self.channel.gain * 100)}%")
         self.on_change()
+

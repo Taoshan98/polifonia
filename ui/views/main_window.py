@@ -4,10 +4,10 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib, Gio
-from polifonia.services.audio_service import AudioService
-from polifonia.storage.preset_manager import PresetManager
-from polifonia.core.models import SystemConfig, SpeakerRole
-from polifonia.ui.views.speaker_row import SpeakerRow
+from services.audio_service import AudioService
+from storage.preset_manager import PresetManager
+from core.models import SystemConfig, SpeakerRole, SpeakerConfig
+from ui.views.speaker_row import SpeakerRow
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -18,6 +18,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.audio_service = audio_service
         self.preset_manager = preset_manager
         self.config: SystemConfig = self.preset_manager.load_config()
+        self._speaker_rows = []
 
         # Merge live sinks with saved configuration
         self._sync_live_sinks()
@@ -26,23 +27,26 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_status_banner()
 
     def _sync_live_sinks(self):
-        live_channels = self.audio_service.get_available_sinks()
-        saved_channels_map = {c.name: c for c in self.config.channels}
+        live_sinks = self.audio_service.get_available_sinks()
+        saved_channels_map = {c.sink_name: c for c in self.config.channels}
         
         updated_channels = []
-        for live in live_channels:
+        for live in live_sinks:
             if live.name in saved_channels_map:
                 saved = saved_channels_map[live.name]
-                live.role = saved.role
-                live.delay_ms = saved.delay_ms
-                live.gain = saved.gain
-                if saved.custom_name:
-                    live.custom_name = saved.custom_name
+                saved.sink_id = live.id
+                saved.display_name = live.description
+                updated_channels.append(saved)
             else:
                 # Default exclusion of internal laptop speakers
-                if "pci" in live.name.lower() or "speaker" in live.display_name.lower():
-                    live.role = SpeakerRole.DISABLED
-            updated_channels.append(live)
+                role = SpeakerRole.EXCLUDED if (live.is_internal or "pci" in live.name.lower() or "speaker" in live.description.lower()) else SpeakerRole.LEFT
+                spk = SpeakerConfig(
+                    sink_id=live.id,
+                    sink_name=live.name,
+                    display_name=live.description,
+                    role=role
+                )
+                updated_channels.append(spk)
 
         self.config.channels = updated_channels
 
@@ -152,12 +156,14 @@ class MainWindow(Adw.ApplicationWindow):
         master_group.add(preset_row)
 
     def _populate_speakers_list(self):
-        for child in list(self.speakers_group.get_children() if hasattr(self.speakers_group, 'get_children') else []):
-            pass # In GTK4 Adw.PreferencesGroup rows are managed
+        for r in self._speaker_rows:
+            self.speakers_group.remove(r)
+        self._speaker_rows.clear()
         
         for ch in self.config.channels:
             row = SpeakerRow(ch, self._on_config_changed, self._on_test_speaker)
             self.speakers_group.add(row)
+            self._speaker_rows.append(row)
 
     def _on_config_changed(self):
         self.preset_manager.save_config(self.config)
@@ -182,17 +188,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay.add_toast(toast)
 
     def _on_toggle_unison_clicked(self, btn):
-        if self.config.is_active:
+        if self.config.is_active or self.audio_service.is_running():
             # Stop unison
-            success = self.audio_service.deactivate_unison()
-            if success:
-                self.config.is_active = False
-                self._on_config_changed()
-                self._refresh_status_banner()
-                self.toast_overlay.add_toast(Adw.Toast.new("Impianto all'unisono disattivato."))
+            self.audio_service.deactivate_unison()
+            self.config.is_active = False
+            self._on_config_changed()
+            self._refresh_status_banner()
+            self.toast_overlay.add_toast(Adw.Toast.new("Impianto all'unisono disattivato."))
         else:
             # Start unison
-            active_channels = [c for c in self.config.channels if c.role != SpeakerRole.DISABLED]
+            active_channels = [c for c in self.config.channels if c.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
             if not active_channels:
                 self.toast_overlay.add_toast(Adw.Toast.new("Nessun altoparlante attivo selezionato!"))
                 return
@@ -208,16 +213,21 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_rescan_clicked(self, btn):
         self._sync_live_sinks()
+        self._populate_speakers_list()
+        self._on_config_changed()
         self.toast_overlay.add_toast(Adw.Toast.new("Elenco uscite audio aggiornato."))
 
     def _on_apply_preset_21(self, btn):
         # Auto-configure 2 monitors as L/R and USB/Aux as Subwoofer
-        hdmi_sinks = [c for c in self.config.channels if "hdmi" in c.name.lower()]
-        usb_sinks = [c for c in self.config.channels if "usb" in c.name.lower()]
+        hdmi_sinks = [c for c in self.config.channels if "hdmi" in c.sink_name.lower()]
+        usb_sinks = [c for c in self.config.channels if "usb" in c.sink_name.lower()]
         
         if len(hdmi_sinks) >= 2:
             hdmi_sinks[0].role = SpeakerRole.LEFT
             hdmi_sinks[1].role = SpeakerRole.RIGHT
+        elif len(hdmi_sinks) == 1:
+            hdmi_sinks[0].role = SpeakerRole.LEFT
+            
         if usb_sinks:
             usb_sinks[0].role = SpeakerRole.SUBWOOFER
             
@@ -225,6 +235,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.config.crossover.frequency_hz = 120
         self.cross_row.set_active(True)
         self.freq_scale.set_value(120)
+        self._populate_speakers_list()
         self._on_config_changed()
         self.toast_overlay.add_toast(Adw.Toast.new("Preset 2.1 applicato!"))
 
@@ -241,3 +252,4 @@ class MainWindow(Adw.ApplicationWindow):
             self.apply_btn.set_label("Attiva Unisono")
             self.apply_btn.remove_css_class("destructive-action")
             self.apply_btn.add_css_class("suggested-action")
+

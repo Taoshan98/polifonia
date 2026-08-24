@@ -2,7 +2,7 @@
 
 import os
 from typing import Dict, Any, List
-from polifonia.core.models import SystemConfig, SpeakerRole, SpeakerConfig
+from core.models import SystemConfig, SpeakerRole, SpeakerConfig
 
 
 class PipeWireConfigGenerator:

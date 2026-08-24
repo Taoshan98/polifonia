@@ -4,7 +4,7 @@ import json
 import subprocess
 import re
 from typing import List, Optional
-from polifonia.core.models import AudioSink
+from core.models import AudioSink
 
 
 class DeviceScanner:
@@ -78,5 +78,15 @@ class DeviceScanner:
 
         return sinks
 
+    @classmethod
+    def get_sinks(cls) -> List[AudioSink]:
+        return cls.scan_sinks()
+
+    @classmethod
+    def get_available_sinks(cls) -> List[AudioSink]:
+        return cls.scan_sinks()
+
+
 # Alias
 PipeWireScanner = DeviceScanner
+

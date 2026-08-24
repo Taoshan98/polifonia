@@ -1,7 +1,7 @@
 import unittest
-from polifonia.core.models import SystemConfig, SpeakerConfig, SpeakerRole, AudioSink
-from polifonia.storage.settings_store import StorageService
-from polifonia.backend.pipewire_config import PipeWireConfigGenerator
+from core.models import SystemConfig, SpeakerConfig, SpeakerRole, AudioSink
+from storage.settings_store import StorageService
+from backend.pipewire_config import PipeWireConfigGenerator
 
 class TestPolifonia(unittest.TestCase):
     def setUp(self):

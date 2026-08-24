@@ -9,10 +9,10 @@ import math
 import struct
 import wave
 from typing import List, Optional
-from polifonia.core.models import SystemConfig, AudioSink, SpeakerRole, SpeakerConfig
-from polifonia.backend.pipewire_scanner import PipeWireScanner
-from polifonia.backend.pipewire_config import PipeWireConfigGenerator
-from polifonia.storage.settings_store import StorageService
+from core.models import SystemConfig, AudioSink, SpeakerRole, SpeakerConfig
+from backend.pipewire_scanner import PipeWireScanner
+from backend.pipewire_config import PipeWireConfigGenerator
+from storage.settings_store import StorageService
 
 
 class AudioEngineService:
@@ -27,37 +27,44 @@ class AudioEngineService:
         """Discovers current hardware sinks and synchronizes config list."""
         sinks = self.scanner.get_sinks()
         
-        existing_keys = {s.sink_name for s in self.config.speakers}
+        existing_channels = self.config.channels
+        existing_keys = {s.sink_name for s in existing_channels}
+        new_channels = list(existing_channels)
+
         for sink in sinks:
-            if sink.node_name not in existing_keys:
-                role = SpeakerRole.EXCLUDED if "pci-0000" in sink.node_name and "analog" in sink.node_name else SpeakerRole.LEFT
-                self.config.speakers.append(
+            if sink.name not in existing_keys:
+                role = SpeakerRole.EXCLUDED if (sink.is_internal or ("pci-0000" in sink.name and "analog" in sink.name)) else SpeakerRole.LEFT
+                new_channels.append(
                     SpeakerConfig(
                         sink_id=sink.id,
-                        sink_name=sink.node_name,
+                        sink_name=sink.name,
                         display_name=sink.description,
                         role=role
                     )
                 )
+        self.config.channels = new_channels
         self.storage.save(self.config)
         return sinks
 
+    def get_available_sinks(self) -> List[AudioSink]:
+        return self.scanner.scan_sinks()
+
     def set_speaker_role(self, sink_name: str, role: SpeakerRole):
-        for spk in self.config.speakers:
+        for spk in self.config.channels:
             if spk.sink_name == sink_name:
                 spk.role = role
                 break
         self.storage.save(self.config)
 
     def set_speaker_delay(self, sink_name: str, delay_ms: float):
-        for spk in self.config.speakers:
+        for spk in self.config.channels:
             if spk.sink_name == sink_name:
                 spk.delay_ms = delay_ms
                 break
         self.storage.save(self.config)
 
     def set_speaker_gain(self, sink_name: str, gain: float):
-        for spk in self.config.speakers:
+        for spk in self.config.channels:
             if spk.sink_name == sink_name:
                 spk.volume_gain = max(0.0, min(1.5, gain))
                 break
@@ -104,11 +111,14 @@ class AudioEngineService:
                 print(f"Error playing test tone: {e}")
         threading.Thread(target=_play, daemon=True).start()
 
+    def test_tone(self, sink_id: int, freq: int = 440, duration: float = 0.6):
+        self.play_test_tone(sink_id, freq, duration)
+
     def start_unison_sink(self) -> bool:
         """Starts the combine-sink / filter-chain module."""
         self.stop_unison_sink()
         
-        active_speakers = [s for s in self.config.speakers if s.role != SpeakerRole.EXCLUDED]
+        active_speakers = [s for s in self.config.channels if s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
         if not active_speakers:
             return False
 
@@ -127,6 +137,15 @@ class AudioEngineService:
                 print(f"Error starting loopback for {spk.sink_id}: {e}")
 
         self._is_active = True
+        return True
+
+    def activate_unison(self, config: Optional[SystemConfig] = None) -> bool:
+        if config:
+            self.config = config
+        return self.start_unison_sink()
+
+    def deactivate_unison(self) -> bool:
+        self.stop_unison_sink()
         return True
 
     def stop_unison_sink(self):

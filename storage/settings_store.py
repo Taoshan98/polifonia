@@ -4,7 +4,7 @@ import os
 import json
 from pathlib import Path
 from typing import Optional, List
-from polifonia.core.models import SystemConfig
+from core.models import SystemConfig
 
 
 class StorageService:
@@ -20,8 +20,9 @@ class StorageService:
         self.active_profile_file = self.base_dir / "current.json"
 
     def save_profile(self, config: SystemConfig, profile_name: Optional[str] = None) -> None:
-        name = profile_name or config.profile_name or "default"
-        config.profile_name = name
+        name = profile_name or getattr(config, "profile_name", "default") or "default"
+        if hasattr(config, "profile_name"):
+            config.profile_name = name
         target = self.profiles_dir / f"{name}.json"
         
         with open(target, "w", encoding="utf-8") as f:
@@ -56,5 +57,14 @@ class StorageService:
     def save(self, config: SystemConfig) -> None:
         self.save_profile(config)
 
+    def load_config(self) -> SystemConfig:
+        return self.load_active_profile()
+
+    def save_config(self, config: SystemConfig, profile_name: Optional[str] = None) -> None:
+        self.save_profile(config, profile_name)
+
+
 ProfileStorageService = StorageService
 SettingsStore = StorageService
+PresetManager = StorageService
+

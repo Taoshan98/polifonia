@@ -12,9 +12,9 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio
 
-from polifonia.services.audio_engine import AudioEngineService
-from polifonia.storage.settings_store import SettingsStore
-from polifonia.ui.views.main_window import MainWindow
+from services.audio_engine import AudioEngineService
+from storage.settings_store import SettingsStore
+from ui.views.main_window import MainWindow
 
 
 class PolifoniaApplication(Adw.Application):
