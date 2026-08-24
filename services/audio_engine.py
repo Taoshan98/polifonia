@@ -21,6 +21,7 @@ class AudioEngineService:
         self.storage = StorageService()
         self.config: SystemConfig = self.storage.load()
         self._sync_processes: Dict[str, subprocess.Popen] = {}
+        self._sync_lock = threading.Lock()
         self._master_module_id: Optional[str] = None
         self._prev_default_sink: Optional[int] = None
         self._is_active = False
@@ -139,16 +140,17 @@ class AudioEngineService:
 
     def _cleanup_all_orphan_nodes(self):
         """Kills any orphan loopback processes and unloads all polifonia master modules."""
-        for proc in self._sync_processes.values():
-            try:
-                proc.terminate()
-                proc.wait(timeout=0.2)
-            except Exception:
+        with self._sync_lock:
+            for proc in self._sync_processes.values():
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    proc.wait(timeout=0.2)
                 except Exception:
-                    pass
-        self._sync_processes.clear()
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+            self._sync_processes.clear()
 
         try:
             subprocess.run(["pkill", "-f", "pw-loopback.*polifonia"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -228,10 +230,11 @@ class AudioEngineService:
         active_speakers = {s.sink_name: s for s in self.config.channels if s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)}
 
         # 1. Terminate branches that are no longer active
-        for sink_name in list(self._sync_processes.keys()):
-            if sink_name not in active_speakers:
-                proc = self._sync_processes.pop(sink_name)
-                self._async_kill(proc)
+        with self._sync_lock:
+            for sink_name in list(self._sync_processes.keys()):
+                if sink_name not in active_speakers:
+                    proc = self._sync_processes.pop(sink_name)
+                    self._async_kill(proc)
 
         # 2. Add or ensure branches for active speakers
         for sink_name, spk in active_speakers.items():
@@ -244,7 +247,9 @@ class AudioEngineService:
                 pass
 
             # If not currently running or crashed, launch it with rock-solid clean buffers
-            if sink_name not in self._sync_processes or self._sync_processes[sink_name].poll() is not None:
+            with self._sync_lock:
+                needs_launch = sink_name not in self._sync_processes or self._sync_processes[sink_name].poll() is not None
+            if needs_launch:
                 target = spk.sink_name or str(spk.sink_id)
 
                 cap_props = f"target.object=polifonia_master stream.capture.sink=true node.name=polifonia_cap_{spk.sink_id}"
@@ -273,15 +278,17 @@ class AudioEngineService:
 
                 try:
                     proc = subprocess.Popen(cmd_loop, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    self._sync_processes[sink_name] = proc
+                    with self._sync_lock:
+                        self._sync_processes[sink_name] = proc
                 except Exception as e:
                     print(f"Error starting loopback for {target}: {e}")
 
     def _restart_single_branch(self, sink_name: str):
         """Restarts only a single speaker's loopback for delay/role changes smoothly."""
-        if sink_name in self._sync_processes:
-            proc = self._sync_processes.pop(sink_name)
-            self._async_kill(proc)
+        with self._sync_lock:
+            if sink_name in self._sync_processes:
+                proc = self._sync_processes.pop(sink_name)
+                self._async_kill(proc)
         self.sync_active_branches()
 
     def start_unison_sink(self) -> bool:

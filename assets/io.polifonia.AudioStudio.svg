@@ -1,78 +1,108 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
   <defs>
-    <!-- Background Dark Studio Canvas Gradient -->
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#0b0e14"/>
       <stop offset="50%" stop-color="#111622"/>
       <stop offset="100%" stop-color="#182030"/>
     </linearGradient>
 
-    <!-- Electric Cyan to Emerald Neon Gradient for Orbit and Rays -->
-    <linearGradient id="neonGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00f2fe"/>
-      <stop offset="50%" stop-color="#38ef7d"/>
-      <stop offset="100%" stop-color="#11998e"/>
+    <!-- CYAN FAMILY: Extended gradient from outermost node edge → deep center -->
+    <!-- Brightest cyan at outer node rim, darkens through orbit/rays to deep ocean at core -->
+
+    <!-- Global radial gradient: drives the overall outside→inside color flow -->
+    <radialGradient id="radialFlow" cx="256" cy="256" r="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0C4A6E"/>
+      <stop offset="40%" stop-color="#0E7490"/>
+      <stop offset="70%" stop-color="#06B6D4"/>
+      <stop offset="90%" stop-color="#22D3EE"/>
+      <stop offset="100%" stop-color="#67E8F9"/>
+    </radialGradient>
+
+    <!-- Left Ray: from outer edge of left node (87-42=45 outward) → center -->
+    <linearGradient id="leftRayGrad" gradientUnits="userSpaceOnUse" x1="45" y1="134" x2="256" y2="256">
+      <stop offset="0%" stop-color="#67E8F9"/>
+      <stop offset="30%" stop-color="#22D3EE"/>
+      <stop offset="60%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#0C4A6E"/>
     </linearGradient>
 
-    <!-- Left Satellite Node Gradient -->
-    <linearGradient id="leftNodeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00f2fe"/>
-      <stop offset="100%" stop-color="#4facfe"/>
+    <!-- Right Ray: from outer edge of right node → center -->
+    <linearGradient id="rightRayGrad" gradientUnits="userSpaceOnUse" x1="467" y1="134" x2="256" y2="256">
+      <stop offset="0%" stop-color="#67E8F9"/>
+      <stop offset="30%" stop-color="#22D3EE"/>
+      <stop offset="60%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#0C4A6E"/>
     </linearGradient>
 
-    <!-- Right Satellite Node Gradient -->
-    <linearGradient id="rightNodeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38ef7d"/>
-      <stop offset="100%" stop-color="#11998e"/>
+    <!-- Sub Ray: from outer edge of sub node → center -->
+    <linearGradient id="subRayGrad" gradientUnits="userSpaceOnUse" x1="256" y1="499" x2="256" y2="256">
+      <stop offset="0%" stop-color="#67E8F9"/>
+      <stop offset="30%" stop-color="#22D3EE"/>
+      <stop offset="60%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#0C4A6E"/>
     </linearGradient>
 
-    <!-- Subwoofer Bass Node Gradient -->
-    <linearGradient id="subNodeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00f2fe"/>
-      <stop offset="100%" stop-color="#38ef7d"/>
-    </linearGradient>
+    <!-- Orbit uses the radial flow naturally -->
 
-    <!-- Core Driver Radial Gradient -->
+    <!-- Core glow: deepest cyan -->
     <radialGradient id="coreAcousticGrad" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#00f2fe" stop-opacity="0.35"/>
-      <stop offset="60%" stop-color="#38ef7d" stop-opacity="0.15"/>
+      <stop offset="0%" stop-color="#0C4A6E" stop-opacity="0.45"/>
+      <stop offset="60%" stop-color="#083344" stop-opacity="0.20"/>
       <stop offset="100%" stop-color="#111622" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Core ring: deep ocean -->
+    <linearGradient id="coreRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E7490"/>
+      <stop offset="100%" stop-color="#0C4A6E"/>
+    </linearGradient>
+
+    <!-- Node strokes and fills use radial flow for natural gradient position -->
+    <!-- Left node gradients -->
+    <radialGradient id="leftNodeStroke" cx="256" cy="256" r="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0E7490"/>
+      <stop offset="70%" stop-color="#22D3EE"/>
+      <stop offset="100%" stop-color="#67E8F9"/>
+    </radialGradient>
+    <radialGradient id="leftNodeFill" cx="256" cy="256" r="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0E7490"/>
+      <stop offset="70%" stop-color="#22D3EE"/>
+      <stop offset="100%" stop-color="#67E8F9"/>
     </radialGradient>
   </defs>
 
-  <!-- Modern Squircle Base Frame -->
+  <!-- Base Frame -->
   <rect x="24" y="24" width="464" height="464" rx="108" fill="url(#bgGrad)" stroke="#1e2738" stroke-width="4"/>
 
-  <!-- Subtle Concentric Soundstage Grid Rings -->
+  <!-- Soundstage Grid Rings -->
   <circle cx="256" cy="256" r="212" fill="none" stroke="#161e2c" stroke-width="2"/>
   <circle cx="256" cy="256" r="180" fill="none" stroke="#1c2536" stroke-width="2"/>
 
-  <!-- Soft Central Acoustic Wave Diffusion -->
+  <!-- Central Acoustic Glow -->
   <circle cx="256" cy="256" r="138" fill="url(#coreAcousticGrad)"/>
 
-  <!-- Outer Soundstage Orbit Ring (3B-2 Precision Geometry) -->
-  <circle cx="256" cy="256" r="195" fill="none" stroke="url(#neonGrad)" stroke-width="10"/>
+  <!-- Outer Orbit Ring — uses radial gradient (bright on edges, mid in between) -->
+  <circle cx="256" cy="256" r="195" fill="none" stroke="url(#radialFlow)" stroke-width="10"/>
 
-  <!-- Phase Alignment Rays -->
-  <line x1="87" y1="158.5" x2="190" y2="218" stroke="url(#leftNodeGrad)" stroke-width="10" stroke-linecap="round"/>
-  <line x1="425" y1="158.5" x2="322" y2="218" stroke="url(#rightNodeGrad)" stroke-width="10" stroke-linecap="round"/>
-  <line x1="256" y1="451" x2="256" y2="334" stroke="url(#subNodeGrad)" stroke-width="10" stroke-linecap="round"/>
+  <!-- Phase Rays — extended gradient from outer node edge to center -->
+  <line x1="87" y1="158.5" x2="190" y2="218" stroke="url(#leftRayGrad)" stroke-width="10" stroke-linecap="round"/>
+  <line x1="425" y1="158.5" x2="322" y2="218" stroke="url(#rightRayGrad)" stroke-width="10" stroke-linecap="round"/>
+  <line x1="256" y1="451" x2="256" y2="334" stroke="url(#subRayGrad)" stroke-width="10" stroke-linecap="round"/>
 
-  <!-- Central Studio Driver Core (Hollow Outer Ring + Concentric Pupils) -->
-  <circle cx="256" cy="256" r="78" fill="#0d111a" stroke="url(#neonGrad)" stroke-width="9"/>
-  <circle cx="256" cy="256" r="56" fill="none" stroke="#253248" stroke-width="5"/>
-  <circle cx="256" cy="256" r="32" fill="url(#neonGrad)"/>
+  <!-- Central Core — deepest ocean blue -->
+  <circle cx="256" cy="256" r="78" fill="#0d111a" stroke="url(#coreRingGrad)" stroke-width="9"/>
+  <circle cx="256" cy="256" r="56" fill="none" stroke="#164e63" stroke-width="5"/>
+  <circle cx="256" cy="256" r="32" fill="url(#coreRingGrad)"/>
 
-  <!-- 3 Physical Speaker Destination Nodes -->
-  <!-- Left Speaker Satellite Node (Top-Left) -->
-  <circle cx="87" cy="158.5" r="42" fill="#0d111a" stroke="url(#leftNodeGrad)" stroke-width="8"/>
-  <circle cx="87" cy="158.5" r="22" fill="url(#leftNodeGrad)"/>
+  <!-- Left Node — bright cyan (positioned far from center = bright in radial) -->
+  <circle cx="87" cy="158.5" r="42" fill="#0d111a" stroke="url(#radialFlow)" stroke-width="8"/>
+  <circle cx="87" cy="158.5" r="22" fill="url(#radialFlow)"/>
 
-  <!-- Right Speaker Satellite Node (Top-Right) -->
-  <circle cx="425" cy="158.5" r="42" fill="#0d111a" stroke="url(#rightNodeGrad)" stroke-width="8"/>
-  <circle cx="425" cy="158.5" r="22" fill="url(#rightNodeGrad)"/>
+  <!-- Right Node -->
+  <circle cx="425" cy="158.5" r="42" fill="#0d111a" stroke="url(#radialFlow)" stroke-width="8"/>
+  <circle cx="425" cy="158.5" r="22" fill="url(#radialFlow)"/>
 
-  <!-- Subwoofer Bass Node (Bottom) -->
-  <circle cx="256" cy="451" r="48" fill="#0d111a" stroke="url(#subNodeGrad)" stroke-width="9"/>
-  <circle cx="256" cy="451" r="26" fill="url(#subNodeGrad)"/>
+  <!-- Sub Node -->
+  <circle cx="256" cy="451" r="48" fill="#0d111a" stroke="url(#radialFlow)" stroke-width="9"/>
+  <circle cx="256" cy="451" r="26" fill="url(#radialFlow)"/>
 </svg>

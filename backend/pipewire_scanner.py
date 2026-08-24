@@ -11,9 +11,9 @@ class DeviceScanner:
     @staticmethod
     def get_default_sink_id() -> Optional[int]:
         try:
-            res = subprocess.run(["wpctl", "status"], capture_output=True, text=True, check=True)
+            res = subprocess.run(["wpctl", "status"], capture_output=True, text=True)
             for line in res.stdout.splitlines():
-                if "*" in line and "Audio/Sink" in line or ("*" in line and "[" in line and "vol:" in line):
+                if ("*" in line and "Audio/Sink" in line) or ("*" in line and "[" in line and "vol:" in line):
                     match = re.search(r"\*\s+(\d+)\.", line)
                     if match:
                         return int(match.group(1))

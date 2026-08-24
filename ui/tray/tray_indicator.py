@@ -24,21 +24,23 @@ class TrayIndicatorApp:
         self.channels = []
         self._syncing_ui = False
 
-        # Use distinct symbolic tray icon with full icon theme structure
-        icon_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons"))
-        if not os.path.exists(icon_dir):
-            icon_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets"))
+        # AppIndicator uses gtk_icon_theme_append_search_path() to find icons.
+        # Two critical requirements:
+        #   1. The directory must contain ONLY icon files (no subdirs like icons/hicolor
+        #      that make GTK interpret it as a theme root)
+        #   2. Avoid the '-symbolic' suffix — AppIndicator applies special lookup
+        #      rules for symbolic icons that break with custom search paths
+        icon_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "tray"))
 
         self.indicator = AppIndicator.Indicator.new_with_path(
             "polifonia_audio_tray",
-            "polifonia-tray-symbolic",
+            "polifonia-tray",
             AppIndicator.IndicatorCategory.APPLICATION_STATUS,
             icon_dir
         )
 
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.indicator.set_title("Polifonia Audio Studio")
-        self.indicator.set_icon_full("polifonia-tray-symbolic", "Polifonia Audio Studio")
 
         self.menu = Gtk.Menu()
         self._rebuild_menu()

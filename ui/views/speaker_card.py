@@ -16,6 +16,8 @@ class SpeakerCard(Gtk.Box):
         self.on_change = on_change_cb
         self.on_test = on_test_cb
         self._updating_ui = False
+        self._vol_debounce_id = 0
+        self._delay_debounce_id = 0
 
         self.add_css_class("channel-card")
         self.set_size_request(190, 520)
@@ -81,10 +83,11 @@ class SpeakerCard(Gtk.Box):
         roles_def = [
             ("L", SpeakerRole.LEFT, 0, 0, "Left Channel (FL)"),
             ("R", SpeakerRole.RIGHT, 1, 0, "Right Channel (FR)"),
-            ("C", SpeakerRole.CENTER, 0, 1, "Center Channel (Mono)"),
-            ("SUB", SpeakerRole.SUBWOOFER, 1, 1, "Subwoofer (Low Frequencies)"),
-            ("ALL", SpeakerRole.STEREO, 0, 2, "Full Stereo (FL+FR)"),
-            ("SURR", SpeakerRole.SURROUND_LEFT, 1, 2, "Surround Channel")
+            ("C", SpeakerRole.CENTER, 2, 0, "Center Channel (Mono)"),
+            ("SUB", SpeakerRole.SUBWOOFER, 3, 0, "Subwoofer (Low Frequencies)"),
+            ("ALL", SpeakerRole.STEREO, 0, 1, "Full Stereo (FL+FR)"),
+            ("SL", SpeakerRole.SURROUND_LEFT, 1, 1, "Surround Left"),
+            ("SR", SpeakerRole.SURROUND_RIGHT, 2, 1, "Surround Right")
         ]
 
         for code, role_val, col, row, tip in roles_def:
@@ -230,7 +233,15 @@ class SpeakerCard(Gtk.Box):
         val = scale.get_value()
         self.channel.volume_gain = round(val, 2)
         self.vol_badge.set_text(f"{int(self.channel.volume_gain * 100)}%")
+        # Debounce: only notify config change after 300ms of inactivity
+        if self._vol_debounce_id:
+            GLib.source_remove(self._vol_debounce_id)
+        self._vol_debounce_id = GLib.timeout_add(300, self._emit_vol_change)
+
+    def _emit_vol_change(self):
+        self._vol_debounce_id = 0
         self.on_change()
+        return False  # Remove timeout
 
     def _on_delay_changed(self, scale):
         val = scale.get_value()
@@ -238,7 +249,15 @@ class SpeakerCard(Gtk.Box):
         # 1ms ~ 0.343m
         dist_m = self.channel.delay_ms * 0.343
         self.delay_badge.set_text(f"{self.channel.delay_ms:.1f}ms ({dist_m:.1f}m)")
+        # Debounce: only notify config change after 300ms of inactivity
+        if self._delay_debounce_id:
+            GLib.source_remove(self._delay_debounce_id)
+        self._delay_debounce_id = GLib.timeout_add(300, self._emit_delay_change)
+
+    def _emit_delay_change(self):
+        self._delay_debounce_id = 0
         self.on_change()
+        return False  # Remove timeout
 
     def _on_test_clicked(self, btn):
         target = self.channel.sink_name or str(self.channel.sink_id)

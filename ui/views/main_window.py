@@ -1,6 +1,7 @@
 """Main Horizontal Studio Mixing Console Application Window."""
 
 import os
+import sys
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -36,6 +37,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.preset_manager = preset_manager
         self.config: SystemConfig = self.preset_manager.load_config()
         self._speaker_cards = []
+        self._master_vol_debounce_id = 0
 
         # Merge live sinks with saved configuration
         self._sync_live_sinks()
@@ -308,22 +310,27 @@ class MainWindow(Adw.ApplicationWindow):
             "SUBWOOFER": SpeakerRole.SUBWOOFER,
             "STEREO": SpeakerRole.STEREO,
             "SURROUND_LEFT": SpeakerRole.SURROUND_LEFT,
+            "SURROUND_RIGHT": SpeakerRole.SURROUND_RIGHT,
             "EXCLUDED": SpeakerRole.EXCLUDED
         }
         target_role = role_map.get(role_str.upper(), SpeakerRole.STEREO)
-        for ch in self.config.channels:
+        for i, ch in enumerate(self.config.channels):
             if ch.sink_name == sink_name:
                 ch.role = target_role
+                if i < len(self._speaker_cards):
+                    self._speaker_cards[i]._sync_state()
                 break
-        self._populate_rack()
         self._on_config_changed()
 
     def _on_tray_set_channel_volume(self, sink_name: str, volume: float):
-        for ch in self.config.channels:
+        for i, ch in enumerate(self.config.channels):
             if ch.sink_name == sink_name:
                 ch.volume_gain = volume
+                if i < len(self._speaker_cards):
+                    card = self._speaker_cards[i]
+                    card.vol_scale.set_value(volume)
+                    card.vol_badge.set_text(f"{int(volume * 100)}%")
                 break
-        self._populate_rack()
         self._on_config_changed()
 
     def _on_tray_test_channel(self, sink_name: str, display_name: str):
@@ -351,7 +358,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.config.master_volume = round(val, 2)
         self.master_vol_badge.set_text(f"{int(self.config.master_volume * 100)}%")
         self.audio_service.set_master_gain(self.config.master_volume)
+        # Debounce save to disk: only persist after 300ms of inactivity
+        if self._master_vol_debounce_id:
+            GLib.source_remove(self._master_vol_debounce_id)
+        self._master_vol_debounce_id = GLib.timeout_add(300, self._emit_master_vol_save)
+
+    def _emit_master_vol_save(self):
+        self._master_vol_debounce_id = 0
+        self.preset_manager.save_config(self.config)
         self._sync_tray_state()
+        return False  # Remove timeout
 
     def _on_default_toggled(self, switch, param):
         self.config.set_as_default = switch.get_active()

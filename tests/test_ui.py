@@ -44,15 +44,17 @@ class TestUI(unittest.TestCase):
         self.assertIn("HDMI Monitor Left", card.title_label.get_tooltip_text())
         self.assertTrue(card.enable_switch.get_active())
 
-        # Test delay adjustment
+        # Test delay adjustment (debounced — verify value update is immediate, then flush debounce)
         card.delay_scale.set_value(22.5)
         self.assertEqual(channel.delay_ms, 22.5)
+        card._emit_delay_change()  # Flush debounce timer
         self.assertTrue(on_change_mock.called)
 
-        # Test gain adjustment
+        # Test gain adjustment (debounced — verify value update is immediate, then flush debounce)
         on_change_mock.reset_mock()
         card.vol_scale.set_value(1.2)
         self.assertEqual(channel.volume_gain, 1.2)
+        card._emit_vol_change()  # Flush debounce timer
         self.assertTrue(on_change_mock.called)
 
         # Test role pill button click

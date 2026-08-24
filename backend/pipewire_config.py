@@ -37,7 +37,7 @@ class PipeWireConfigGenerator:
                     active_channels.append(SpeakerConfig(
                         sink_id=s["sink_id"],
                         sink_name=s["sink_name"],
-                        sink_description=s.get("sink_description", ""),
+                        display_name=s.get("display_name", s.get("sink_description", "")),
                         role=role,
                         delay_ms=float(s.get("delay_ms", 0.0)),
                         volume_gain=float(s.get("volume_gain", s.get("gain", 1.0))),
@@ -66,7 +66,11 @@ class PipeWireConfigGenerator:
             "                nodes = ["
         ]
 
-        # 1. Add Filter Nodes for each active channel
+        # 1. Add Input Splitter Nodes (one per input channel)
+        lines.append('                    { type = builtin label = copy name = input_FL }')
+        lines.append('                    { type = builtin label = copy name = input_FR }')
+
+        # 2. Add Filter Nodes for each active channel
         for ch in active_channels:
             gain_val = ch.volume_gain * system_config.master_volume
             delay_sec = ch.delay_ms / 1000.0
@@ -82,7 +86,6 @@ class PipeWireConfigGenerator:
                 # Passthrough / Flat
                 filter_def = 'type = builtin label = copy'
 
-            node_def = f'                    {{ type = builtin label = copy name = copy_{ch.sink_id} }}'
             lines.append(f"                    # Filter chain for Sink {ch.sink_id} ({ch.role.value})")
             lines.append(f'                    {{ {filter_def} name = filter_{ch.sink_id} }}')
 
@@ -91,16 +94,24 @@ class PipeWireConfigGenerator:
             "                links = ["
         ])
 
-        # 2. Add Links from Input to Filters
+        # 3. Add Links from Input Splitters to Filters
         for ch in active_channels:
-            lines.append(f'                    {{ output = "filter_{ch.sink_id}:Out" input = "playback_{ch.sink_id}:In" }}')
+            # Route left or right input channel to appropriate filter
+            if ch.role == SpeakerRole.LEFT:
+                lines.append(f'                    {{ output = "input_FL:Out" input = "filter_{ch.sink_id}:In" }}')
+            elif ch.role == SpeakerRole.RIGHT:
+                lines.append(f'                    {{ output = "input_FR:Out" input = "filter_{ch.sink_id}:In" }}')
+            else:
+                # Stereo, Center, Subwoofer, Surround: receive both channels
+                lines.append(f'                    {{ output = "input_FL:Out" input = "filter_{ch.sink_id}:In" }}')
+                lines.append(f'                    {{ output = "input_FR:Out" input = "filter_{ch.sink_id}:In" }}')
 
         lines.extend([
             "                ]",
             "                inputs  = [",
-            '                    "filter_in_l:In"',
-            '                    "filter_in_r:In"',
-            "                ]",
+            '                    "input_FL:In"',
+            '                    "input_FR:In"',
+            "                ];",
             "            }",
             "            audio.channels = 2",
             '            audio.position = [ FL FR ]',
