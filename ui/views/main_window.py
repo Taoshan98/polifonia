@@ -1,3 +1,5 @@
+"""Main Horizontal Studio Mixing Console Application Window."""
+
 import os
 import gi
 gi.require_version('Gtk', '4.0')
@@ -6,13 +8,15 @@ from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 from services.audio_service import AudioService
 from storage.preset_manager import PresetManager
 from core.models import SystemConfig, SpeakerRole, SpeakerConfig
-from ui.views.speaker_row import SpeakerRow
+from ui.views.speaker_card import SpeakerCard
 
 
 class MainWindow(Adw.ApplicationWindow):
+    """Professional Horizontal Studio Mixing Console for Polifonia."""
+
     def __init__(self, app, audio_service: AudioService, preset_manager: PresetManager):
         super().__init__(application=app, title="Polifonia Audio Studio")
-        self.set_default_size(750, 800)
+        self.set_default_size(1080, 680)
 
         # Load Custom Cross-Desktop Studio Theme
         css_provider = Gtk.CssProvider()
@@ -30,13 +34,19 @@ class MainWindow(Adw.ApplicationWindow):
         self.audio_service = audio_service
         self.preset_manager = preset_manager
         self.config: SystemConfig = self.preset_manager.load_config()
-        self._speaker_rows = []
+        self._speaker_cards = []
 
         # Merge live sinks with saved configuration
         self._sync_live_sinks()
 
+        # If saved as active, auto-activate the audio unison engine
+        if self.config.is_active:
+            success = self.audio_service.activate_unison(self.config)
+            if not success:
+                self.config.is_active = False
+
         self._build_ui()
-        self._refresh_status_banner()
+        self._refresh_master_ui()
 
     def _sync_live_sinks(self):
         live_sinks = self.audio_service.get_available_sinks()
@@ -50,7 +60,6 @@ class MainWindow(Adw.ApplicationWindow):
                 saved.display_name = live.description
                 updated_channels.append(saved)
             else:
-                # Default exclusion of internal laptop speakers
                 role = SpeakerRole.EXCLUDED if (live.is_internal or "pci" in live.name.lower() or "speaker" in live.description.lower()) else SpeakerRole.LEFT
                 spk = SpeakerConfig(
                     sink_id=live.id,
@@ -63,208 +72,179 @@ class MainWindow(Adw.ApplicationWindow):
         self.config.channels = updated_channels
 
     def _build_ui(self):
-        # Toast overlay for modern notifications
+        # Toast overlay for notifications
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
 
-        # Main Box
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.toast_overlay.set_child(main_box)
+        # Main Vertical Container
+        main_layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.toast_overlay.set_child(main_layout)
 
-        # Header Bar
+        # 1. Native HeaderBar
         header_bar = Adw.HeaderBar()
-        title_widget = Adw.WindowTitle(title="Polifonia Audio", subtitle="Gestione Sistema Audio Multi-Monitor / 2.1")
+        title_widget = Adw.WindowTitle(title="Polifonia Audio Studio", subtitle="Multi-Channel Mixing Console & Unison Engine")
         header_bar.set_title_widget(title_widget)
 
-        # Reload / Rescan button in header
+        # Hardware Rescan Button
         rescan_btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        rescan_btn.set_tooltip_text("Riscansiona uscite audio PipeWire")
+        rescan_btn.set_tooltip_text("Rescan PipeWire Audio Endpoints")
         rescan_btn.connect("clicked", self._on_rescan_clicked)
         header_bar.pack_start(rescan_btn)
 
-        # Apply & Activate Button in header
-        self.apply_btn = Gtk.Button(label="Attiva Unisono")
-        self.apply_btn.add_css_class("suggested-action")
-        self.apply_btn.connect("clicked", self._on_toggle_unison_clicked)
-        header_bar.pack_end(self.apply_btn)
+        # Presets Menu Button
+        preset_btn = Gtk.MenuButton()
+        preset_btn.set_icon_name("document-open-recent-symbolic")
+        preset_btn.set_tooltip_text("Profiles & Audio Presets")
+        header_bar.pack_start(preset_btn)
 
-        main_box.append(header_bar)
+        main_layout.append(header_bar)
 
-        # Status Banner
-        self.banner = Adw.Banner()
-        self.banner.set_use_markup(True)
-        main_box.append(self.banner)
+        # 2. Master Control Bar (Master Gain, Big Neon Master Button)
+        master_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        master_bar.add_css_class("master-header-box")
 
-        # Preferences Page / Scrollable content
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_vexpand(True)
-        main_box.append(scroll)
+        # Master Gain Fader
+        master_gain_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        master_gain_box.set_hexpand(True)
+        master_gain_box.set_valign(Gtk.Align.CENTER)
+        master_gain_box.set_halign(Gtk.Align.START)
 
-        pref_page = Adw.PreferencesPage()
-        scroll.set_child(pref_page)
+        master_lbl = Gtk.Label(label="MASTER VOLUME")
+        master_lbl.add_css_class("strip-section-label")
+        master_gain_box.append(master_lbl)
 
-        # Group 1: Speakers & Monitors
-        self.speakers_group = Adw.PreferencesGroup()
-        self.speakers_group.set_title("Monitor e Altoparlanti Rilevati")
-        self.speakers_group.set_description(
-            "Configura il ruolo (SX, DX, Subwoofer), il ritardo temporale e il volume per ogni dispositivo."
-        )
-        pref_page.add(self.speakers_group)
+        self.master_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 1.5, 0.05)
+        self.master_scale.set_size_request(260, -1)
+        self.master_scale.set_value(self.config.master_volume)
+        self.master_scale.connect("value-changed", self._on_master_volume_changed)
+        master_gain_box.append(self.master_scale)
 
-        self._populate_speakers_list()
+        self.master_vol_badge = Gtk.Label(label=f"{int(self.config.master_volume * 100)}%")
+        self.master_vol_badge.add_css_class("vol-badge")
+        master_gain_box.append(self.master_vol_badge)
 
-        # Group 2: Crossover DSP & Tuning (2.1)
-        dsp_group = Adw.PreferencesGroup()
-        dsp_group.set_title("Filtro Crossover e Equalizzazione (2.1)")
-        dsp_group.set_description(
-            "Isola le basse frequenze sulla cassa aux/subwoofer e alleggerisce i monitor satelliti."
-        )
-        pref_page.add(dsp_group)
+        master_bar.append(master_gain_box)
 
-        # Crossover Enable Switch
-        self.cross_row = Adw.SwitchRow()
-        self.cross_row.set_title("Abilita Filtro Crossover 2.1")
-        self.cross_row.set_subtitle("Invia le basse frequenze al Subwoofer e le medie/alte ai satelliti SX/DX")
-        self.cross_row.set_active(self.config.crossover.enabled)
-        self.cross_row.connect("notify::active", self._on_crossover_toggled)
-        dsp_group.add(self.cross_row)
+        # Big Neon Master Toggle Button
+        self.master_toggle_btn = Gtk.Button(label="▶  ACTIVATE UNISON")
+        self.master_toggle_btn.add_css_class("master-toggle-btn-off")
+        self.master_toggle_btn.set_valign(Gtk.Align.CENTER)
+        self.master_toggle_btn.connect("clicked", self._on_toggle_unison_clicked)
+        master_bar.append(self.master_toggle_btn)
 
-        # Crossover Frequency Slider
-        self.freq_row = Adw.ActionRow()
-        self.freq_row.set_title("Frequenza di Taglio (Crossover)")
-        self.freq_row.set_subtitle(f"{self.config.crossover.frequency_hz} Hz")
+        main_layout.append(master_bar)
 
-        self.freq_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 40, 250, 5)
-        self.freq_scale.set_value(self.config.crossover.frequency_hz)
-        self.freq_scale.set_hexpand(True)
-        self.freq_scale.set_size_request(200, -1)
-        self.freq_scale.connect("value-changed", self._on_freq_changed)
-        self.freq_row.add_suffix(self.freq_scale)
-        dsp_group.add(self.freq_row)
+        # 3. Central Horizontal Channel Strips Rack
+        scroll_window = Gtk.ScrolledWindow()
+        scroll_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroll_window.set_vexpand(True)
+        scroll_window.add_css_class("rack-scroll-window")
 
-        # Group 3: Master Control & Presets
-        master_group = Adw.PreferencesGroup()
-        master_group.set_title("Controllo Generale e Predefiniti")
-        pref_page.add(master_group)
+        self.rack_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        self.rack_box.set_margin_start(16)
+        self.rack_box.set_margin_end(16)
+        self.rack_box.set_margin_top(12)
+        self.rack_box.set_margin_bottom(12)
+        self.rack_box.set_halign(Gtk.Align.START)
+        
+        scroll_window.set_child(self.rack_box)
+        main_layout.append(scroll_window)
 
-        # Set as default audio output switch
-        self.default_switch = Adw.SwitchRow()
-        self.default_switch.set_title("Imposta come Uscita Audio Predefinita di Sistema")
-        self.default_switch.set_subtitle("Tutte le app (browser, spotify, giochi) useranno l'impianto unisono")
+        # Populate Channel Strips
+        self._populate_rack()
+
+        # 4. Footer Tools & Engine Bar
+        footer_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
+        footer_bar.add_css_class("footer-dsp-bar")
+
+        # Engine Status Info
+        engine_info = Gtk.Label(label="PipeWire Native • Zero-Latency Multi-Channel Unison")
+        engine_info.add_css_class("strip-section-label")
+        engine_info.set_valign(Gtk.Align.CENTER)
+        engine_info.set_halign(Gtk.Align.START)
+        footer_bar.append(engine_info)
+
+        # Default System Sink Toggle
+        default_sink_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        default_sink_box.add_css_class("dsp-box")
+        default_sink_box.set_valign(Gtk.Align.CENTER)
+        default_sink_box.set_hexpand(True)
+        default_sink_box.set_halign(Gtk.Align.END)
+
+        def_lbl = Gtk.Label(label="SET AS SYSTEM DEFAULT SINK")
+        def_lbl.add_css_class("strip-section-label")
+        default_sink_box.append(def_lbl)
+
+        self.default_switch = Gtk.Switch()
         self.default_switch.set_active(self.config.set_as_default)
         self.default_switch.connect("notify::active", self._on_default_toggled)
-        master_group.add(self.default_switch)
+        default_sink_box.append(self.default_switch)
 
-        # Quick Preset Buttons
-        preset_row = Adw.ActionRow()
-        preset_row.set_title("Preset Rapidi")
-        preset_row.set_subtitle("Carica impostazioni ottimali predefinite")
+        footer_bar.append(default_sink_box)
+        main_layout.append(footer_bar)
 
-        p21_btn = Gtk.Button(label="Setup 2.1 Ottimale")
-        p21_btn.set_valign(Gtk.Align.CENTER)
-        p21_btn.connect("clicked", self._on_apply_preset_21)
-        preset_row.add_suffix(p21_btn)
+    def _populate_rack(self):
+        # Clear existing cards
+        while self.rack_box.get_first_child():
+            self.rack_box.remove(self.rack_box.get_first_child())
+        self._speaker_cards.clear()
 
-        master_group.add(preset_row)
-
-    def _populate_speakers_list(self):
-        for r in self._speaker_rows:
-            self.speakers_group.remove(r)
-        self._speaker_rows.clear()
-        
+        # Add speaker channel strip cards
         for ch in self.config.channels:
-            row = SpeakerRow(ch, self._on_config_changed, self._on_test_speaker)
-            self.speakers_group.add(row)
-            self._speaker_rows.append(row)
+            card = SpeakerCard(ch, self._on_config_changed, self._on_test_speaker)
+            self.rack_box.append(card)
+            self._speaker_cards.append(card)
+
+    def _refresh_master_ui(self):
+        is_active = self.config.is_active or self.audio_service.is_running()
+        if is_active:
+            self.master_toggle_btn.set_label("⏹  DEACTIVATE")
+            self.master_toggle_btn.remove_css_class("master-toggle-btn-off")
+            self.master_toggle_btn.add_css_class("master-toggle-btn-on")
+        else:
+            self.master_toggle_btn.set_label("▶  ACTIVATE UNISON")
+            self.master_toggle_btn.remove_css_class("master-toggle-btn-on")
+            self.master_toggle_btn.add_css_class("master-toggle-btn-off")
 
     def _on_config_changed(self):
         self.preset_manager.save_config(self.config)
         if self.config.is_active or self.audio_service.is_running():
             self.audio_service.sync_active_branches()
 
-    def _on_crossover_toggled(self, row, param):
-        self.config.crossover.enabled = row.get_active()
-        self._on_config_changed()
+    def _on_master_volume_changed(self, scale):
+        val = scale.get_value()
+        self.config.master_volume = round(val, 2)
+        self.master_vol_badge.set_text(f"{int(self.config.master_volume * 100)}%")
+        self.audio_service.set_master_gain(self.config.master_volume)
 
-    def _on_freq_changed(self, scale):
-        val = int(scale.get_value())
-        self.config.crossover.frequency_hz = val
-        self.freq_row.set_subtitle(f"{val} Hz")
-        self._on_config_changed()
-
-    def _on_default_toggled(self, row, param):
-        self.config.set_as_default = row.get_active()
+    def _on_default_toggled(self, switch, param):
+        self.config.set_as_default = switch.get_active()
         self._on_config_changed()
 
     def _on_test_speaker(self, target, display_name=None):
         self.audio_service.test_tone(target)
         name_str = display_name or str(target)
-        toast = Adw.Toast.new(f"Tono di test inviato a: {name_str}")
+        toast = Adw.Toast.new(f"Test tone sent to: {name_str}")
         self.toast_overlay.add_toast(toast)
 
     def _on_toggle_unison_clicked(self, btn):
         if self.config.is_active or self.audio_service.is_running():
-            # Stop unison
             self.audio_service.deactivate_unison()
             self.config.is_active = False
             self.preset_manager.save_config(self.config)
-            self._refresh_status_banner()
-            self.toast_overlay.add_toast(Adw.Toast.new("Impianto all'unisono disattivato."))
+            self._refresh_master_ui()
+            self.toast_overlay.add_toast(Adw.Toast.new("Unison engine deactivated."))
         else:
-            # Start unison
-            active_channels = [c for c in self.config.channels if c.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
-            if not active_channels:
-                self.toast_overlay.add_toast(Adw.Toast.new("Nessun altoparlante attivo selezionato!"))
-                return
-            
             success = self.audio_service.activate_unison(self.config)
             if success:
                 self.config.is_active = True
                 self.preset_manager.save_config(self.config)
-                self._refresh_status_banner()
-                self.toast_overlay.add_toast(Adw.Toast.new("Impianto all'unisono ATTIVO con successo!"))
+                self._refresh_master_ui()
+                self.toast_overlay.add_toast(Adw.Toast.new("Unison engine activated successfully!"))
             else:
-                self.toast_overlay.add_toast(Adw.Toast.new("Errore durante l'attivazione di PipeWire."))
+                self.toast_overlay.add_toast(Adw.Toast.new("No active channels selected."))
 
     def _on_rescan_clicked(self, btn):
         self._sync_live_sinks()
-        self._populate_speakers_list()
-        self._on_config_changed()
-        self.toast_overlay.add_toast(Adw.Toast.new("Elenco uscite audio aggiornato."))
-
-    def _on_apply_preset_21(self, btn):
-        # Auto-configure 2 monitors as L/R and USB/Aux as Subwoofer
-        hdmi_sinks = [c for c in self.config.channels if "hdmi" in c.sink_name.lower()]
-        usb_sinks = [c for c in self.config.channels if "usb" in c.sink_name.lower()]
-        
-        if len(hdmi_sinks) >= 2:
-            hdmi_sinks[0].role = SpeakerRole.LEFT
-            hdmi_sinks[1].role = SpeakerRole.RIGHT
-        elif len(hdmi_sinks) == 1:
-            hdmi_sinks[0].role = SpeakerRole.LEFT
-            
-        if usb_sinks:
-            usb_sinks[0].role = SpeakerRole.SUBWOOFER
-            
-        self.config.crossover.enabled = True
-        self.config.crossover.frequency_hz = 120
-        self.cross_row.set_active(True)
-        self.freq_scale.set_value(120)
-        self._populate_speakers_list()
-        self._on_config_changed()
-        self.toast_overlay.add_toast(Adw.Toast.new("Preset 2.1 applicato!"))
-
-    def _refresh_status_banner(self):
-        if self.config.is_active:
-            self.banner.set_title("<b>Stato: IMPIANTO ALL'UNISONO ATTIVO</b>")
-            self.banner.set_revealed(True)
-            self.apply_btn.set_label("Disattiva")
-            self.apply_btn.remove_css_class("suggested-action")
-            self.apply_btn.add_css_class("destructive-action")
-        else:
-            self.banner.set_title("Stato: Inattivo (Uscite audio separate standard)")
-            self.banner.set_revealed(True)
-            self.apply_btn.set_label("Attiva Unisono")
-            self.apply_btn.remove_css_class("destructive-action")
-            self.apply_btn.add_css_class("suggested-action")
-
+        self._populate_rack()
+        self.toast_overlay.add_toast(Adw.Toast.new("Hardware audio devices refreshed."))

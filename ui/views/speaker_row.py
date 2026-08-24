@@ -45,17 +45,17 @@ class SpeakerRow(Adw.ExpanderRow):
     def _build_controls(self):
         # 1. Role Selection (Left, Right, Center/Sub, Stereo, Mirror)
         self.role_row = Adw.ComboRow()
-        self.role_row.set_title("Ruolo Canale")
-        self.role_row.set_subtitle("Assegna la posizione spaziale o la funzione audio")
+        self.role_row.set_title("Channel Role")
+        self.role_row.set_subtitle("Assign spatial position or acoustic function")
         
         self.role_options = [
-            (SpeakerRole.STEREO, "Stereo (Completo L+R)"),
-            (SpeakerRole.LEFT, "Sinistra (Left Satellite)"),
-            (SpeakerRole.RIGHT, "Destra (Right Satellite)"),
-            (SpeakerRole.SUBWOOFER, "Subwoofer / Cassa Bassi (LFE)"),
-            (SpeakerRole.CENTER, "Centrale (Mono / Dialoghi)"),
-            (SpeakerRole.SURROUND_LEFT, "Surround Sinistro"),
-            (SpeakerRole.SURROUND_RIGHT, "Surround Destro"),
+            (SpeakerRole.STEREO, "Stereo (Full L+R)"),
+            (SpeakerRole.LEFT, "Left (Left Satellite)"),
+            (SpeakerRole.RIGHT, "Right (Right Satellite)"),
+            (SpeakerRole.SUBWOOFER, "Subwoofer (Low Frequency Effects)"),
+            (SpeakerRole.CENTER, "Center (Mono / Dialogues)"),
+            (SpeakerRole.SURROUND_LEFT, "Left Surround"),
+            (SpeakerRole.SURROUND_RIGHT, "Right Surround"),
         ]
         
         model = Gtk.StringList()
@@ -72,7 +72,7 @@ class SpeakerRow(Adw.ExpanderRow):
 
         # 2. Time Alignment / Delay Slider
         self.delay_row = Adw.ActionRow()
-        self.delay_row.set_title("Allineamento Temporale (Ritardo)")
+        self.delay_row.set_title("Time Alignment (Delay)")
         self.delay_row.set_subtitle(f"{self.channel.delay_ms:.1f} ms")
 
         self.delay_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 150.0, 0.5)
@@ -85,7 +85,7 @@ class SpeakerRow(Adw.ExpanderRow):
 
         # 3. Channel Gain / Calibration Slider
         self.gain_row = Adw.ActionRow()
-        self.gain_row.set_title("Calibrazione Guadagno (Volume Singolo)")
+        self.gain_row.set_title("Gain Calibration (Individual Volume)")
         self.gain_row.set_subtitle(f"{int(self.channel.gain * 100)}%")
 
         self.gain_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 1.5, 0.05)
@@ -98,11 +98,11 @@ class SpeakerRow(Adw.ExpanderRow):
 
         # 4. Test Tone Button
         self.test_row = Adw.ActionRow()
-        self.test_row.set_title("Verifica Uscita")
-        self.test_row.set_subtitle("Invia un segnale audio di test su questo singolo monitor/altoparlante")
+        self.test_row.set_title("Verify Channel Output")
+        self.test_row.set_subtitle("Send a synthetic audio test tone to this specific monitor/speaker")
 
         test_btn = Gtk.Button.new_from_icon_name("audio-volume-high-symbolic")
-        test_btn.set_tooltip_text("Riproduci tono di test (Beep)")
+        test_btn.set_tooltip_text("Play test tone (Beep)")
         test_btn.set_valign(Gtk.Align.CENTER)
         test_btn.add_css_class("suggested-action")
         test_btn.connect("clicked", lambda b: self.on_test(self.channel.sink_name or self.channel.sink_id, self.channel.display_name or self.channel.sink_name))

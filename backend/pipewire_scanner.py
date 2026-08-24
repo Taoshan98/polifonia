@@ -86,6 +86,8 @@ class DeviceScanner:
         except Exception:
             return sinks
 
+        card_allocated_monitors = {}
+
         for obj in objects:
             if obj.get("type") != "PipeWire:Interface:Node":
                 continue
@@ -103,7 +105,6 @@ class DeviceScanner:
 
             node_id = obj.get("id")
             card_id = props.get("alsa.card")
-            device_id = props.get("alsa.device")
             raw_desc = (
                 props.get("node.nick") or 
                 props.get("node.description") or 
@@ -123,39 +124,29 @@ class DeviceScanner:
                 c_num = int(card_id) if card_id is not None else None
                 if c_num is not None and c_num in eld_map:
                     monitors = eld_map[c_num]
-                    # Map device index to connected monitor
-                    d_num = int(device_id) if device_id is not None else 0
-                    m_idx = 0
-                    if d_num == 3:
-                        m_idx = 0
-                    elif d_num == 7:
-                        m_idx = 1
-                    elif d_num == 8:
-                        m_idx = 2
-                    elif d_num < len(monitors):
-                        m_idx = d_num
-
-                    if m_idx < len(monitors):
-                        mon = monitors[m_idx]
+                    curr_idx = card_allocated_monitors.get(c_num, 0)
+                    if curr_idx < len(monitors):
+                        mon = monitors[curr_idx]
+                        card_allocated_monitors[c_num] = curr_idx + 1
                         description = f"Monitor {mon['name']} ({mon['connection']})"
                     else:
-                        # Unconnected/phantom HDMI port
+                        # Unconnected phantom HDMI/DP port on this graphics card
                         continue
                 else:
                     # Unconnected HDMI/DP port on card without active ELD
                     continue
             elif "speaker" in raw_desc_lower or "speaker" in name_lower or form_factor == "internal":
-                description = "Altoparlanti Integrati (Speakers)"
+                description = "Integrated Speakers (Internal)"
                 is_internal = True
             elif "headphone" in raw_desc_lower or "headphone" in name_lower:
                 clean_name = props.get("node.nick") or props.get("device.product.name") or "Analog"
-                description = f"Cuffie / Uscita Audio ({clean_name})"
+                description = f"Headphones / Audio Jack ({clean_name})"
             elif bus == "usb" or "usb" in name_lower:
-                clean_name = props.get("node.nick") or props.get("device.product.name") or raw_desc.replace("Stereo analogico", "").strip()
-                description = f"Audio USB ({clean_name})"
+                clean_name = props.get("node.nick") or props.get("device.product.name") or raw_desc.replace("Analog Stereo", "").replace("Stereo analogico", "").strip()
+                description = f"USB Audio ({clean_name})"
             elif bus == "bluetooth" or "bluez" in name_lower:
                 clean_name = props.get("node.nick") or props.get("device.product.name") or "Bluetooth Device"
-                description = f"Audio Bluetooth ({clean_name})"
+                description = f"Bluetooth Audio ({clean_name})"
             else:
                 description = raw_desc
 
@@ -167,6 +158,19 @@ class DeviceScanner:
                 is_internal=is_internal
             )
             sinks.append(sink)
+
+        # Disambiguate duplicate monitor names (e.g. multiple identical models)
+        name_counts = {}
+        for s in sinks:
+            name_counts[s.description] = name_counts.get(s.description, 0) + 1
+
+        if any(cnt > 1 for cnt in name_counts.values()):
+            seen_indices = {}
+            for s in sinks:
+                if name_counts[s.description] > 1:
+                    idx = seen_indices.get(s.description, 1)
+                    seen_indices[s.description] = idx + 1
+                    s.description = f"{s.description} ({idx})"
 
         return sinks
 

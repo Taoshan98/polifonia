@@ -129,12 +129,12 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
 
             # Check USB Sink
             self.assertIn(88, sink_map)
-            self.assertEqual(sink_map[88].description, "Audio USB (USB Subwoofer DAC)")
+            self.assertEqual(sink_map[88].description, "USB Audio (USB Subwoofer DAC)")
             self.assertFalse(sink_map[88].is_internal)
 
             # Check Internal Laptop Speaker
             self.assertIn(99, sink_map)
-            self.assertEqual(sink_map[99].description, "Altoparlanti Integrati (Speakers)")
+            self.assertEqual(sink_map[99].description, "Integrated Speakers (Internal)")
             self.assertTrue(sink_map[99].is_internal)
 
             # Ensure virtual node 105 and source node 110 are not present

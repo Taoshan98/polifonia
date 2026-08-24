@@ -1,84 +1,268 @@
-/* Polifonia Audio Studio - Custom Cross-Desktop Theme */
+/* Polifonia Audio Studio - Professional Digital Console & Dark Theme */
 
 window {
-    background-color: #111215;
-    color: #e4e7eb;
+    background-color: #0b0d11;
+    color: #e2e8f0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 headerbar {
-    background-color: #16181d;
-    border-bottom: 1px solid #232730;
+    background: linear-gradient(180deg, #161922 0%, #10121a 100%);
+    border-bottom: 1px solid #242938;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Master Header Section */
+.master-header-box {
+    background: linear-gradient(180deg, #131620 0%, #0e1017 100%);
+    border-bottom: 1px solid #1f2533;
+    padding: 12px 24px;
+}
+
+.studio-brand-title {
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
     color: #ffffff;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
-.status-active-box {
-    background: linear-gradient(135deg, rgba(0, 229, 255, 0.12) 0%, rgba(58, 123, 213, 0.18) 100%);
-    border: 1px solid rgba(0, 229, 255, 0.35);
-    border-radius: 12px;
-    padding: 12px 16px;
+.status-badge-active {
+    background: rgba(0, 229, 255, 0.15);
+    border: 1px solid #00e5ff;
+    color: #00e5ff;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 20px;
+    padding: 4px 12px;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
 }
 
-.status-idle-box {
-    background: #181a20;
-    border: 1px solid #282c37;
-    border-radius: 12px;
-    padding: 12px 16px;
+.status-badge-idle {
+    background: #181c26;
+    border: 1px solid #2a3142;
+    color: #7a869a;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 20px;
+    padding: 4px 12px;
 }
 
-.card {
-    background-color: #181a20;
-    border: 1px solid #262a36;
+.master-toggle-btn-on {
+    background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 14px;
+    border: none;
     border-radius: 10px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    padding: 8px 22px;
+    box-shadow: 0 0 18px rgba(0, 210, 255, 0.45);
 }
 
+.master-toggle-btn-off {
+    background: #1c212e;
+    color: #94a3b8;
+    font-weight: 700;
+    font-size: 14px;
+    border: 1px solid #2d374d;
+    border-radius: 10px;
+    padding: 8px 22px;
+}
+
+.master-toggle-btn-off:hover {
+    background: #252b3b;
+    color: #ffffff;
+}
+
+/* Central Rack Area */
+.rack-scroll-window {
+    background-color: #0b0d11;
+    padding: 16px;
+}
+
+/* Channel Strip Card */
 .channel-card {
-    background-color: #1a1d24;
-    border: 1px solid #282c38;
-    border-radius: 8px;
-    margin-bottom: 6px;
-    transition: all 200ms ease;
+    background: linear-gradient(180deg, #161922 0%, #11131a 100%);
+    border: 1px solid #242a38;
+    border-radius: 14px;
+    padding: 14px 12px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .channel-card:hover {
-    border-color: #3b4255;
-    background-color: #1e212a;
+    border-color: #3b455c;
+    box-shadow: 0 8px 24px rgba(0, 229, 255, 0.12);
 }
 
-scale highlight {
-    background: linear-gradient(90deg, #00d2ff 0%, #00e5ff 100%);
+.strip-header {
+    margin-bottom: 4px;
+}
+
+.strip-icon {
+    color: #00e5ff;
+}
+
+.conn-badge {
+    background-color: #1f2533;
+    color: #00e5ff;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #2d364a;
+}
+
+.strip-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-top: 4px;
+}
+
+.strip-section-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    color: #64748b;
+    text-transform: uppercase;
+}
+
+/* Role Selector Pills */
+.role-pill {
+    background: #1a1e2a;
+    border: 1px solid #283042;
+    color: #8fa0b5;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 6px;
+    min-width: 36px;
+    min-height: 28px;
+    padding: 2px 6px;
+}
+
+.role-pill:hover {
+    background: #252b3b;
+    color: #ffffff;
+}
+
+.role-pill-active {
+    background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
+    border: 1px solid #00e5ff;
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.35);
+}
+
+.role-pill-sub {
+    background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+    border-color: #c084fc;
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.35);
+}
+
+.role-pill-left {
+    background: linear-gradient(135deg, #06b6d4 0%, #0284c7 100%);
+    color: #ffffff;
+}
+
+.role-pill-right {
+    background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
+    color: #ffffff;
+}
+
+/* Vertical Volume Fader */
+.vertical-fader {
+    min-height: 140px;
+    margin: 4px 0;
+}
+
+.vertical-fader highlight {
+    background: linear-gradient(180deg, #00ff88 0%, #00d2ff 100%);
     border-radius: 4px;
 }
 
-scale slider {
-    background-color: #ffffff;
+.vertical-fader trough {
+    background-color: #1a1e29;
+    border: 1px solid #293040;
+    border-radius: 4px;
+    min-width: 8px;
+}
+
+.vertical-fader slider {
+    background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
     border: 2px solid #00e5ff;
-    border-radius: 50%;
-    min-width: 18px;
-    min-height: 18px;
-    box-shadow: 0 0 8px rgba(0, 229, 255, 0.5);
+    border-radius: 4px;
+    min-width: 24px;
+    min-height: 14px;
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
 }
 
-switch:checked {
-    background-color: #00d2ff;
-    border-color: #00b4db;
+.vol-badge {
+    background: #181d28;
+    color: #00ff88;
+    font-size: 11px;
+    font-weight: 800;
+    font-family: monospace;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #283144;
 }
 
-button.suggested-action {
-    background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
-    color: #ffffff;
-    font-weight: bold;
-    border: none;
+.delay-badge {
+    background: #181d28;
+    color: #00d2ff;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: monospace;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.horizontal-delay-slider highlight {
+    background: #00d2ff;
+}
+
+.strip-test-btn {
+    background: #1b202c;
+    border: 1px solid #2d3548;
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 700;
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 210, 255, 0.3);
+    padding: 6px 10px;
 }
 
-button.destructive-action {
-    background: linear-gradient(135deg, #ff4b4b 0%, #d32f2f 100%);
-    color: #ffffff;
-    font-weight: bold;
-    border: none;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(255, 75, 75, 0.3);
+.strip-test-btn:hover {
+    background: #283042;
+    color: #00e5ff;
+    border-color: #00e5ff;
+}
+
+/* Footer DSP Rack */
+.footer-dsp-bar {
+    background: linear-gradient(180deg, #10121a 0%, #0a0b0e 100%);
+    border-top: 1px solid #1f2533;
+    padding: 12px 24px;
+}
+
+.dsp-box {
+    background: #141720;
+    border: 1px solid #232a3a;
+    border-radius: 10px;
+    padding: 8px 16px;
+}
+
+.dsp-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #e2e8f0;
+}
+
+.dsp-freq-badge {
+    background: #1e2433;
+    color: #a855f7;
+    font-size: 11px;
+    font-weight: 800;
+    font-family: monospace;
+    padding: 2px 8px;
+    border-radius: 4px;
 }
