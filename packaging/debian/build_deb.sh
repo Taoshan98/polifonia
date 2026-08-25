@@ -17,8 +17,6 @@ mkdir -p "${PKG_DIR}/usr/share/doc/polifonia"
 
 # Copy debian control file
 cp "${ROOT_DIR}/packaging/debian/control" "${PKG_DIR}/DEBIAN/"
-sed -i "s/\${misc:Depends}//g" "${PKG_DIR}/DEBIAN/control"
-sed -i "s/\${python3:Depends}/python3 (>= 3.10)/g" "${PKG_DIR}/DEBIAN/control"
 echo "Version: ${VERSION}" >> "${PKG_DIR}/DEBIAN/control"
 
 # Copy source files to /usr/lib/polifonia
