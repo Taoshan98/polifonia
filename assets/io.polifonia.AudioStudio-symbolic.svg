@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <defs>
+    <!-- Mask to cleanly cut out orbit and rays under the nodes -->
+    <mask id="trayMask">
+      <rect width="512" height="512" fill="#ffffff"/>
+      <!-- Mask out node zones so rays/orbit don't bleed through -->
+      <circle cx="256" cy="256" r="82" fill="#000000"/>
+      <circle cx="87" cy="158.5" r="46" fill="#000000"/>
+      <circle cx="425" cy="158.5" r="46" fill="#000000"/>
+      <circle cx="256" cy="451" r="52" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <!-- Masked Soundstage Orbit & Connecting Rays (Full prominent circle) -->
+  <g mask="url(#trayMask)">
+    <!-- Prominent Outer Soundstage Orbit Circle -->
+    <circle cx="256" cy="256" r="195" fill="none" stroke="#222222" stroke-width="16"/>
+
+    <!-- Phase Alignment Rays -->
+    <line x1="87" y1="158.5" x2="256" y2="256" stroke="#222222" stroke-width="16" stroke-linecap="round"/>
+    <line x1="425" y1="158.5" x2="256" y2="256" stroke="#222222" stroke-width="16" stroke-linecap="round"/>
+    <line x1="256" y1="451" x2="256" y2="256" stroke="#222222" stroke-width="16" stroke-linecap="round"/>
+  </g>
+
+  <!-- Central Studio Driver Core (Concentric Driver Pupils) -->
+  <circle cx="256" cy="256" r="78" fill="none" stroke="#222222" stroke-width="13"/>
+  <circle cx="256" cy="256" r="56" fill="none" stroke="#222222" stroke-width="6" opacity="0.45"/>
+  <circle cx="256" cy="256" r="32" fill="#222222"/>
+
+  <!-- Left Satellite Speaker Node (Top-Left) -->
+  <circle cx="87" cy="158.5" r="42" fill="none" stroke="#222222" stroke-width="12"/>
+  <circle cx="87" cy="158.5" r="22" fill="#222222"/>
+
+  <!-- Right Satellite Speaker Node (Top-Right) -->
+  <circle cx="425" cy="158.5" r="42" fill="none" stroke="#222222" stroke-width="12"/>
+  <circle cx="425" cy="158.5" r="22" fill="#222222"/>
+
+  <!-- Subwoofer Bass Node (Bottom) -->
+  <circle cx="256" cy="451" r="48" fill="none" stroke="#222222" stroke-width="13"/>
+  <circle cx="256" cy="451" r="26" fill="#222222"/>
+</svg>
