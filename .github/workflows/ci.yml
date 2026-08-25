@@ -35,7 +35,9 @@ jobs:
             pkg-config \
             pipewire \
             wireplumber \
-            pulseaudio-utils
+            pulseaudio-utils \
+            xvfb \
+            dbus-x11
 
       - name: Install Python Dependencies
         run: |
@@ -44,7 +46,7 @@ jobs:
 
       - name: Execute Test Suite
         run: |
-          python3 -m unittest discover -s tests -v
+          xvfb-run -a dbus-run-session python3 -m unittest discover -s tests -v
 
       - name: Test Package Build
         run: |
