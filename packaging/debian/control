@@ -1,13 +1,9 @@
-Source: polifonia
+Package: polifonia
 Section: sound
 Priority: optional
-Maintainer: Polifonia Contributors <info@polifonia.io>
-Build-Depends: debhelper-compat (= 13), python3-all, python3-setuptools, python3-gi, libgtk-4-dev, libadwaita-1-dev
-Standards-Version: 4.6.2
-Homepage: https://github.com/taoshan/polifonia
-
-Package: polifonia
 Architecture: all
+Maintainer: Polifonia Contributors <info@polifonia.io>
+Homepage: https://github.com/taoshan/polifonia
 Depends: ${python3:Depends}, ${misc:Depends}, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, pipewire, pipewire-pulse, wireplumber, pulseaudio-utils
 Description: Multi-Speaker & Multi-Monitor Audio Unison Engine for Linux
  Polifonia Audio Studio allows broadcasting synchronized audio to multiple
