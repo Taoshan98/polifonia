@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Polifonia
-GenericName=Polifonia\
+GenericName=Polifonia
 Comment=Multi-speaker audio unison engine for PipeWire
 Exec=polifonia
 Icon=io.polifonia.AudioStudio
