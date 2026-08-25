@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        Multi-Speaker & Multi-Monitor Audio Unison Engine for Linux
 
 License:        MIT
-URL:            https://github.com/taoshan/polifonia
+URL:            https://github.com/Taoshan98/polifonia
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch

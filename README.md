@@ -153,7 +153,7 @@ sudo pacman -S python-gobject gtk4 libadwaita pipewire pipewire-pulse wireplumbe
 
 ### Running from Source
 ```bash
-git clone https://github.com/taoshan/polifonia.git
+git clone https://github.com/Taoshan98/polifonia.git
 cd polifonia
 python3 main.py
 ```

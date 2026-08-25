@@ -3,7 +3,7 @@ Section: sound
 Priority: optional
 Architecture: all
 Maintainer: Polifonia Contributors <info@polifonia.io>
-Homepage: https://github.com/taoshan/polifonia
+Homepage: https://github.com/Taoshan98/polifonia
 Depends: ${python3:Depends}, ${misc:Depends}, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, pipewire, pipewire-pulse, wireplumber, pulseaudio-utils
 Description: Multi-Speaker & Multi-Monitor Audio Unison Engine for Linux
  Polifonia Audio Studio allows broadcasting synchronized audio to multiple

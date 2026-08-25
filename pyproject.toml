@@ -29,8 +29,8 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/taoshan/polifonia"
-"Bug Tracker" = "https://github.com/taoshan/polifonia/issues"
+"Homepage" = "https://github.com/Taoshan98/polifonia"
+"Bug Tracker" = "https://github.com/Taoshan98/polifonia/issues"
 
 [project.scripts]
 polifonia = "main:main"
