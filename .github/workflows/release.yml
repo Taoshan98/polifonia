@@ -17,7 +17,7 @@ permissions:
 jobs:
   build-packages:
     name: Build Multi-Format Packages
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
@@ -35,7 +35,7 @@ jobs:
             python3-gi \
             gir1.2-gtk-4.0 \
             gir1.2-adw-1 \
-            libgirepository1.0-dev \
+            libgirepository-2.0-dev \
             libcairo2-dev \
             pkg-config \
             libfuse2 \
