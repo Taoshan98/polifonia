@@ -71,25 +71,38 @@ class MainWindow(Adw.ApplicationWindow):
     def _sync_live_sinks(self):
         live_sinks = self.audio_service.get_available_sinks()
         saved_channels_map = {c.sink_name: c for c in self.config.channels}
+        saved_by_display = {c.display_name: c for c in self.config.channels if c.display_name}
         
-        updated_channels = []
         for live in live_sinks:
             if live.name in saved_channels_map:
                 saved = saved_channels_map[live.name]
                 saved.sink_id = live.id
                 saved.display_name = live.description
-                updated_channels.append(saved)
+                saved.hardware_latency_ms = live.latency_ms
+                saved.bus_type = live.bus_type
+            elif live.description in saved_by_display:
+                # Match by hardware description if sink_name changed across systems or ports
+                matched = saved_by_display[live.description]
+                matched.sink_id = live.id
+                matched.sink_name = live.name
+                matched.hardware_latency_ms = live.latency_ms
+                matched.bus_type = live.bus_type
+                saved_channels_map[live.name] = matched
             else:
-                role = SpeakerRole.EXCLUDED if (live.is_internal or "pci" in live.name.lower() or "speaker" in live.description.lower()) else SpeakerRole.LEFT
+                role = SpeakerRole.EXCLUDED if (live.is_internal or live.bus_type == "bluetooth") else SpeakerRole.LEFT
                 spk = SpeakerConfig(
                     sink_id=live.id,
                     sink_name=live.name,
                     display_name=live.description,
-                    role=role
+                    role=role,
+                    hardware_latency_ms=live.latency_ms,
+                    bus_type=live.bus_type
                 )
-                updated_channels.append(spk)
+                saved_channels_map[live.name] = spk
 
-        self.config.channels = updated_channels
+        # Keep all known channels so offline/sleeping devices are not lost when saving config
+        self.config.channels = list(saved_channels_map.values())
+        self.audio_service.update_config(self.config)
 
     def _build_ui(self):
         # Toast overlay for notifications
@@ -217,21 +230,26 @@ class MainWindow(Adw.ApplicationWindow):
             self.rack_box.remove(self.rack_box.get_first_child())
         self._speaker_cards.clear()
 
-        # Add speaker channel strip cards
+        # Add speaker channel strip cards for currently live endpoints
+        live_names = {s.name for s in self.audio_service.get_available_sinks()}
         for ch in self.config.channels:
-            card = SpeakerCard(ch, self._on_config_changed, self._on_test_speaker)
-            self.rack_box.append(card)
-            self._speaker_cards.append(card)
+            if not live_names or ch.sink_name in live_names:
+                card = SpeakerCard(ch, self._on_config_changed, self._on_test_speaker)
+                self.rack_box.append(card)
+                self._speaker_cards.append(card)
 
     def _serialize_channels_for_tray(self) -> list:
         res = []
+        live_names = {s.name for s in self.audio_service.get_available_sinks()}
         for ch in self.config.channels:
+            if live_names and ch.sink_name not in live_names:
+                continue
             is_enabled = ch.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)
             role_val = ch.role.value if hasattr(ch.role, "value") else str(ch.role)
             res.append({
                 "sink_id": ch.sink_id,
                 "sink_name": ch.sink_name,
-                "display_name": ch.display_name or ch.sink_name,
+                "display_name": ch.custom_name or ch.display_name or ch.sink_name,
                 "role": role_val,
                 "volume_gain": ch.volume_gain,
                 "delay_ms": ch.delay_ms,
@@ -349,6 +367,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_config_changed(self):
         self.preset_manager.save_config(self.config)
+        self.audio_service.update_config(self.config)
         if self.config.is_active or self.audio_service.is_running():
             self.audio_service.sync_active_branches()
         self._sync_tray_state()
@@ -366,6 +385,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _emit_master_vol_save(self):
         self._master_vol_debounce_id = 0
         self.preset_manager.save_config(self.config)
+        self.audio_service.update_config(self.config)
         self._sync_tray_state()
         return False  # Remove timeout
 
@@ -399,5 +419,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_rescan_clicked(self, btn):
         self._sync_live_sinks()
         self._populate_rack()
+        if self.config.is_active or self.audio_service.is_running():
+            self.audio_service.sync_active_branches()
         self._sync_tray_state()
         self.toast_overlay.add_toast(Adw.Toast.new("Hardware audio devices refreshed."))

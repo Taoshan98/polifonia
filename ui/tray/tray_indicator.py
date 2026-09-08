@@ -30,14 +30,31 @@ class TrayIndicatorApp:
         #      that make GTK interpret it as a theme root)
         #   2. Avoid the '-symbolic' suffix — AppIndicator applies special lookup
         #      rules for symbolic icons that break with custom search paths
-        icon_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "tray"))
+        candidate_dirs = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "tray")),
+            "/usr/share/polifonia/assets/tray",
+            "/usr/local/share/polifonia/assets/tray",
+            "/app/share/polifonia/assets/tray",
+        ]
+        icon_dir = ""
+        for d in candidate_dirs:
+            if os.path.isdir(d):
+                icon_dir = d
+                break
 
-        self.indicator = AppIndicator.Indicator.new_with_path(
-            "polifonia_audio_tray",
-            "polifonia-tray",
-            AppIndicator.IndicatorCategory.APPLICATION_STATUS,
-            icon_dir
-        )
+        if icon_dir:
+            self.indicator = AppIndicator.Indicator.new_with_path(
+                "polifonia_audio_tray",
+                "polifonia-tray",
+                AppIndicator.IndicatorCategory.APPLICATION_STATUS,
+                icon_dir
+            )
+        else:
+            self.indicator = AppIndicator.Indicator.new(
+                "polifonia_audio_tray",
+                "audio-speakers-symbolic",
+                AppIndicator.IndicatorCategory.APPLICATION_STATUS
+            )
 
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.indicator.set_title("Polifonia Audio Studio")

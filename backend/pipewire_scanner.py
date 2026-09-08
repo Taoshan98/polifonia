@@ -119,8 +119,10 @@ class DeviceScanner:
             # Dynamic Classification
             is_internal = False
             is_digital_hdmi = "hdmi" in name_lower or "pro-output" in name_lower or "iec958" in name_lower
+            bus_type = "other"
 
             if is_digital_hdmi:
+                bus_type = "hdmi"
                 c_num = int(card_id) if card_id is not None else None
                 if c_num is not None and c_num in eld_map:
                     monitors = eld_map[c_num]
@@ -138,24 +140,61 @@ class DeviceScanner:
             elif "speaker" in raw_desc_lower or "speaker" in name_lower or form_factor == "internal":
                 description = "Integrated Speakers (Internal)"
                 is_internal = True
+                bus_type = "internal"
             elif "headphone" in raw_desc_lower or "headphone" in name_lower:
                 clean_name = props.get("node.nick") or props.get("device.product.name") or "Analog"
                 description = f"Headphones / Audio Jack ({clean_name})"
+                bus_type = "jack"
             elif bus == "usb" or "usb" in name_lower:
                 clean_name = props.get("node.nick") or props.get("device.product.name") or raw_desc.replace("Analog Stereo", "").replace("Stereo analogico", "").strip()
                 description = f"USB Audio ({clean_name})"
+                bus_type = "usb"
             elif bus == "bluetooth" or "bluez" in name_lower:
-                clean_name = props.get("node.nick") or props.get("device.product.name") or "Bluetooth Device"
+                clean_name = (
+                    props.get("node.description") or 
+                    props.get("media.name") or 
+                    props.get("device.alias") or 
+                    props.get("node.nick") or 
+                    props.get("device.product.name") or 
+                    props.get("device.description") or 
+                    "Bluetooth Device"
+                ).strip()
+                for prefix in ["Bluetooth Audio (", "Bluetooth ("]:
+                    if clean_name.startswith(prefix) and clean_name.endswith(")"):
+                        clean_name = clean_name[len(prefix):-1].strip()
                 description = f"Bluetooth Audio ({clean_name})"
+                bus_type = "bluetooth"
             else:
                 description = raw_desc
+                bus_type = bus or "pci"
+
+            # Calculate hardware latency in ms
+            latency_ms = 0.0
+            params = obj.get("info", {}).get("params", {})
+            for lat in params.get("Latency", []):
+                if isinstance(lat, dict):
+                    min_ns = lat.get("minNs", 0)
+                    if min_ns and min_ns > 0:
+                        latency_ms = max(latency_ms, min_ns / 1_000_000.0)
+
+            # Assign sensible default buffer latency if idle/unreported
+            if bus_type == "bluetooth" and latency_ms <= 0.0:
+                latency_ms = 180.0
+            elif bus_type in ("hdmi", "pci") and latency_ms <= 0.0:
+                latency_ms = 10.0
+            elif bus_type == "usb" and latency_ms <= 0.0:
+                latency_ms = 12.0
+            elif bus_type == "internal" and latency_ms <= 0.0:
+                latency_ms = 5.0
 
             sink = AudioSink(
                 id=node_id,
                 name=name,
                 description=description,
                 media_class=media_class,
-                is_internal=is_internal
+                is_internal=is_internal,
+                latency_ms=round(latency_ms, 1),
+                bus_type=bus_type
             )
             sinks.append(sink)
 

@@ -147,6 +147,44 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
             sinks = DeviceScanner.scan_sinks()
             self.assertEqual(sinks, [])
 
+    def test_scan_bluetooth_device_with_custom_name_and_latency(self):
+        """Verify Bluetooth device name is correctly resolved from node.description and latency is extracted."""
+        mock_pw_dump = [
+            {
+                "id": 139,
+                "type": "PipeWire:Interface:Node",
+                "info": {
+                    "props": {
+                        "media.class": "Audio/Sink",
+                        "node.name": "bluez_output.4C_87_5D_9F_7E_60.1",
+                        "node.description": "Black Diamond",
+                        "device.bus": "bluetooth",
+                        "api.bluez5.codec": "aac"
+                    },
+                    "params": {
+                        "Latency": [
+                            {
+                                "direction": "Input",
+                                "minNs": 188999999,
+                                "maxNs": 188999999
+                            }
+                        ]
+                    }
+                }
+            }
+        ]
+        with patch("subprocess.check_output", return_value=json.dumps(mock_pw_dump)), \
+             patch.object(DeviceScanner, "get_eld_monitors", return_value={}), \
+             patch("subprocess.run"):
+            sinks = DeviceScanner.scan_sinks()
+            self.assertEqual(len(sinks), 1)
+            bt_sink = sinks[0]
+            self.assertEqual(bt_sink.id, 139)
+            self.assertEqual(bt_sink.name, "bluez_output.4C_87_5D_9F_7E_60.1")
+            self.assertEqual(bt_sink.description, "Bluetooth Audio (Black Diamond)")
+            self.assertEqual(bt_sink.bus_type, "bluetooth")
+            self.assertEqual(bt_sink.latency_ms, 189.0)
+
     def test_scanner_aliases(self):
         """Verify alias class and helper methods."""
         self.assertIs(PipeWireScanner, DeviceScanner)
@@ -158,3 +196,4 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
 
 if __name__ == "__main__":
     unittest.main()
+

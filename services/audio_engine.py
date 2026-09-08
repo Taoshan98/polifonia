@@ -21,10 +21,17 @@ class AudioEngineService:
         self.storage = StorageService()
         self.config: SystemConfig = self.storage.load()
         self._sync_processes: Dict[str, subprocess.Popen] = {}
+        self._running_delays: Dict[str, float] = {}
         self._sync_lock = threading.Lock()
         self._master_module_id: Optional[str] = None
         self._prev_default_sink: Optional[int] = None
         self._is_active = False
+        self._branch_seq = 0
+
+    def update_config(self, config: SystemConfig):
+        """Updates internal configuration reference and persists it."""
+        self.config = config
+        self.storage.save(self.config)
 
     def get_devices(self) -> List[AudioSink]:
         """Discovers current hardware sinks and synchronizes config list."""
@@ -36,17 +43,21 @@ class AudioEngineService:
 
         for sink in sinks:
             if sink.name in existing_map:
-                # Update display name if improved
+                # Update display name and dynamic hardware properties
                 existing_map[sink.name].display_name = sink.description
                 existing_map[sink.name].sink_id = sink.id
+                existing_map[sink.name].hardware_latency_ms = sink.latency_ms
+                existing_map[sink.name].bus_type = sink.bus_type
             else:
-                role = SpeakerRole.EXCLUDED if sink.is_internal else SpeakerRole.LEFT
+                role = SpeakerRole.EXCLUDED if (sink.is_internal or sink.bus_type == "bluetooth") else SpeakerRole.LEFT
                 new_channels.append(
                     SpeakerConfig(
                         sink_id=sink.id,
                         sink_name=sink.name,
                         display_name=sink.description,
-                        role=role
+                        role=role,
+                        hardware_latency_ms=sink.latency_ms,
+                        bus_type=sink.bus_type
                     )
                 )
         self.config.channels = new_channels
@@ -151,6 +162,7 @@ class AudioEngineService:
                     except Exception:
                         pass
             self._sync_processes.clear()
+            self._running_delays.clear()
 
         try:
             subprocess.run(["pkill", "-f", "pw-loopback.*polifonia"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -183,9 +195,20 @@ class AudioEngineService:
         except Exception:
             pass
 
-        # Save previous default sink
+        # Save previous default sink, making sure it is a real hardware sink and not polifonia_master
         if self._prev_default_sink is None:
-            self._prev_default_sink = self.scanner.get_default_sink_id()
+            cur_def = self.scanner.get_default_sink_id()
+            try:
+                def_name = subprocess.check_output(["pactl", "get-default-sink"], text=True).strip()
+            except Exception:
+                def_name = ""
+            if "polifonia" not in def_name.lower():
+                self._prev_default_sink = cur_def
+            else:
+                # Find first non-virtual physical sink
+                real_sinks = self.scanner.get_sinks()
+                if real_sinks:
+                    self._prev_default_sink = real_sinks[0].id
 
         sink_desc = "Polifonia Audio Studio (2.1)"
         cmd_master = [
@@ -222,6 +245,20 @@ class AudioEngineService:
                 pass
         threading.Thread(target=_do_kill, daemon=True).start()
 
+    @staticmethod
+    def _wake_sink(sink_name: str):
+        """Sends a 50ms pulse of silence to proactively wake up sleeping/suspended sinks without audio click."""
+        try:
+            subprocess.run(
+                ["pacat", "--playback", f"--device={sink_name}", "--format=s16le", "--rate=48000", "--channels=2"],
+                input=b'\x00' * 4800,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=0.15
+            )
+        except Exception:
+            pass
+
     def sync_active_branches(self):
         """Seamlessly starts or stops individual speaker loopbacks with clean crystal audio without stopping main playback."""
         if not self._is_active:
@@ -229,16 +266,38 @@ class AudioEngineService:
 
         active_speakers = {s.sink_name: s for s in self.config.channels if s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)}
 
+        # Determine maximum hardware latency across active speakers for acoustic auto-alignment
+        max_hw_latency = max((getattr(s, "hardware_latency_ms", 0.0) for s in active_speakers.values()), default=0.0)
+
+        # Detect if any active branch is a Bluetooth / high-latency device
+        has_bt_active = any(
+            (getattr(s, "bus_type", "") == "bluetooth") or ("bluez" in s.sink_name.lower())
+            for s in active_speakers.values()
+        )
+
         # 1. Terminate branches that are no longer active
         with self._sync_lock:
             for sink_name in list(self._sync_processes.keys()):
                 if sink_name not in active_speakers:
                     proc = self._sync_processes.pop(sink_name)
+                    self._running_delays.pop(sink_name, None)
                     self._async_kill(proc)
 
-        # 2. Add or ensure branches for active speakers
-        for sink_name, spk in active_speakers.items():
-            # Update hardware volume and mute
+        # 2. Add or ensure branches for active speakers, ordering highest latency (Bluetooth) first
+        sorted_speakers = sorted(
+            active_speakers.items(),
+            key=lambda item: getattr(item[1], "hardware_latency_ms", 0.0),
+            reverse=True
+        )
+
+        for sink_name, spk in sorted_speakers:
+            hw_lat = getattr(spk, "hardware_latency_ms", 0.0)
+            auto_comp_delay_ms = max(0.0, max_hw_latency - hw_lat)
+            total_delay_ms = spk.delay_ms + auto_comp_delay_ms
+
+            is_bt = (getattr(spk, "bus_type", "") == "bluetooth") or ("bluez" in sink_name.lower())
+
+            # Update hardware volume and unmute
             try:
                 vol_pct = f"{max(10, int(spk.volume_gain * 100))}%"
                 subprocess.run(["pactl", "set-sink-mute", sink_name, "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -246,14 +305,35 @@ class AudioEngineService:
             except Exception:
                 pass
 
-            # If not currently running or crashed, launch it with rock-solid clean buffers
+            # Proactively wake up Bluetooth sink if it is currently sleeping/suspended
+            if is_bt:
+                self._wake_sink(sink_name)
+
+            # Check if launch or restart is needed (e.g. process died, not started, or delay shifted)
             with self._sync_lock:
-                needs_launch = sink_name not in self._sync_processes or self._sync_processes[sink_name].poll() is not None
+                current_proc = self._sync_processes.get(sink_name)
+                proc_dead = (current_proc is None) or (current_proc.poll() is not None)
+                delay_changed = abs(self._running_delays.get(sink_name, -1.0) - total_delay_ms) > 0.5
+                needs_launch = proc_dead or delay_changed
+
+                if needs_launch and current_proc and not proc_dead:
+                    old_proc = self._sync_processes.pop(sink_name)
+                    try:
+                        old_proc.terminate()
+                        old_proc.wait(timeout=0.08)
+                    except Exception:
+                        try:
+                            old_proc.kill()
+                        except Exception:
+                            pass
+
             if needs_launch:
                 target = spk.sink_name or str(spk.sink_id)
+                self._branch_seq += 1
+                seq_tag = f"{spk.sink_id}_{self._branch_seq}"
 
-                cap_props = f"target.object=polifonia_master stream.capture.sink=true node.name=polifonia_cap_{spk.sink_id}"
-                play_props = f"target.object={target} node.name=polifonia_play_{spk.sink_id} node.passive=true"
+                cap_props = f"target.object=polifonia_master stream.capture.sink=true node.name=polifonia_cap_{seq_tag}"
+                play_props = f"target.object={target} node.name=polifonia_play_{seq_tag} node.passive={'false' if is_bt else 'true'}"
 
                 if spk.role == SpeakerRole.LEFT:
                     cap_props += " audio.position=[ FL ]"
@@ -268,18 +348,23 @@ class AudioEngineService:
                 cmd_loop = [
                     "pw-loopback",
                     f"--capture-props={cap_props}",
-                    f"--playback-props={play_props}",
-                    "-l", "15",
-                    "-n", f"polifonia_branch_{spk.sink_id}"
+                    f"--playback-props={play_props}"
                 ]
 
-                if spk.delay_ms > 0:
-                    cmd_loop.extend(["--delay", f"{spk.delay_ms / 1000.0:.4f}"])
+                # Only constrain buffer latency to 15ms if NO high-latency/Bluetooth devices are active
+                if not is_bt and not has_bt_active:
+                    cmd_loop.extend(["-l", "15"])
+
+                cmd_loop.extend(["-n", f"polifonia_branch_{seq_tag}"])
+
+                if total_delay_ms > 0.05:
+                    cmd_loop.extend(["--delay", f"{total_delay_ms / 1000.0:.4f}"])
 
                 try:
                     proc = subprocess.Popen(cmd_loop, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     with self._sync_lock:
                         self._sync_processes[sink_name] = proc
+                        self._running_delays[sink_name] = total_delay_ms
                 except Exception as e:
                     print(f"Error starting loopback for {target}: {e}")
 
@@ -288,6 +373,7 @@ class AudioEngineService:
         with self._sync_lock:
             if sink_name in self._sync_processes:
                 proc = self._sync_processes.pop(sink_name)
+                self._running_delays.pop(sink_name, None)
                 self._async_kill(proc)
         self.sync_active_branches()
 

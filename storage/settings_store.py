@@ -25,11 +25,16 @@ class StorageService:
             config.profile_name = name
         target = self.profiles_dir / f"{name}.json"
         
-        with open(target, "w", encoding="utf-8") as f:
+        # Atomic writes using temp files to protect against crash or sudden power loss
+        tmp_target = target.with_suffix(".tmp")
+        with open(tmp_target, "w", encoding="utf-8") as f:
             json.dump(config.to_dict(), f, indent=2)
+        tmp_target.replace(target)
             
-        with open(self.active_profile_file, "w", encoding="utf-8") as f:
+        tmp_active = self.active_profile_file.with_suffix(".tmp")
+        with open(tmp_active, "w", encoding="utf-8") as f:
             json.dump(config.to_dict(), f, indent=2)
+        tmp_active.replace(self.active_profile_file)
 
     def load_active_profile(self) -> SystemConfig:
         if self.active_profile_file.exists():

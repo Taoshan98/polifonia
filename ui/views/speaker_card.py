@@ -55,14 +55,38 @@ class SpeakerCard(Gtk.Box):
         top_line.append(self.enable_switch)
         header_box.append(top_line)
 
-        # Title / Commercial Device Name
-        short_title = self._short_name(self.channel.display_name or self.channel.sink_name)
-        self.title_label = Gtk.Label(label=short_title)
-        self.title_label.set_tooltip_text(self.channel.display_name or self.channel.sink_name)
+        # Title Row: Label + Rename MenuButton
+        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        title_box.set_halign(Gtk.Align.CENTER)
+        title_box.set_hexpand(True)
+
+        display_title = self._get_display_title()
+        self.title_label = Gtk.Label(label=display_title)
+        self.title_label.set_tooltip_text(self._get_title_tooltip())
         self.title_label.add_css_class("strip-title")
+        if self.channel.custom_name:
+            self.title_label.add_css_class("strip-title-custom")
         self.title_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
-        self.title_label.set_halign(Gtk.Align.CENTER)
-        header_box.append(self.title_label)
+        self.title_label.set_max_width_chars(15)
+
+        # Rename Popover and Button
+        self.edit_btn = Gtk.Button.new_from_icon_name("document-edit-symbolic")
+        self.edit_btn.set_tooltip_text("Personalizza etichetta uscita audio")
+        self.edit_btn.add_css_class("flat")
+        self.edit_btn.add_css_class("strip-edit-btn")
+        self.edit_btn.set_valign(Gtk.Align.CENTER)
+
+        self._setup_rename_popover()
+        self.edit_btn.connect("clicked", lambda b: self.popover.popup())
+
+        # Allow clicking directly on the title to open the rename popover
+        title_click = Gtk.GestureClick()
+        title_click.connect("released", lambda g, n, x, y: self.popover.popup())
+        self.title_label.add_controller(title_click)
+
+        title_box.append(self.title_label)
+        title_box.append(self.edit_btn)
+        header_box.append(title_box)
 
         self.append(header_box)
 
@@ -134,12 +158,14 @@ class SpeakerCard(Gtk.Box):
         delay_lbl.set_halign(Gtk.Align.START)
         delay_hdr.append(delay_lbl)
 
-        self.delay_badge = Gtk.Label(label=f"{self.channel.delay_ms:.1f}ms")
+        hw_lat = getattr(self.channel, "hardware_latency_ms", 0.0)
+        init_badge = f"{self.channel.delay_ms:.0f}ms (HW:{hw_lat:.0f}ms)" if hw_lat > 0 else f"{self.channel.delay_ms:.1f}ms"
+        self.delay_badge = Gtk.Label(label=init_badge)
         self.delay_badge.add_css_class("delay-badge")
         delay_hdr.append(self.delay_badge)
         delay_box.append(delay_hdr)
 
-        self.delay_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 80.0, 1.0)
+        self.delay_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 300.0, 1.0)
         self.delay_scale.set_value(self.channel.delay_ms)
         self.delay_scale.add_css_class("horizontal-delay-slider")
         self.delay_scale.connect("value-changed", self._on_delay_changed)
@@ -155,7 +181,9 @@ class SpeakerCard(Gtk.Box):
 
     def _resolve_icon(self) -> str:
         name = (self.channel.display_name or self.channel.sink_name).lower()
-        if "monitor" in name or "hdmi" in name or "displayport" in name:
+        if getattr(self.channel, "bus_type", "") == "bluetooth" or "bluetooth" in name or "bluez" in name:
+            return "audio-headphones-bluetooth"
+        elif "monitor" in name or "hdmi" in name or "displayport" in name:
             return "video-display-symbolic"
         elif "speaker" in name or "laptop" in name or "internal" in name:
             return "audio-speakers-symbolic"
@@ -163,30 +191,38 @@ class SpeakerCard(Gtk.Box):
             return "audio-card-analog-usb-symbolic"
         elif "headphone" in name:
             return "audio-headphones-symbolic"
-        elif "bluetooth" in name or "bluez" in name:
-            return "bluetooth-active-symbolic"
         return "audio-speakers-symbolic"
 
     def _resolve_connection_badge(self) -> str:
         name = (self.channel.display_name or self.channel.sink_name).lower()
-        if "displayport" in name or "dp" in name:
+        if getattr(self.channel, "bus_type", "") == "bluetooth" or "bluetooth" in name or "bluez" in name:
+            return "BT"
+        elif "displayport" in name or "dp" in name:
             return "DP"
         elif "hdmi" in name:
             return "HDMI"
         elif "usb" in name:
             return "USB"
-        elif "bluetooth" in name:
-            return "BT"
         elif "pci" in name or "speaker" in name:
             return "PCI"
         return "OUT"
 
     def _short_name(self, full_name: str) -> str:
-        cleaned = full_name.replace("Monitor ", "").replace("Audio ", "").replace("Integrated Speakers ", "")
-        # Cut after parenthesis if too long
-        if "(" in cleaned and len(cleaned) > 20:
-            cleaned = cleaned.split("(")[0].strip()
-        return cleaned[:22]
+        cleaned = full_name.replace("Monitor ", "").replace("Integrated Speakers ", "")
+        if "Bluetooth Audio (" in cleaned and cleaned.endswith(")"):
+            cleaned = cleaned[len("Bluetooth Audio ("):-1].strip()
+        elif "Bluetooth (" in cleaned and cleaned.endswith(")"):
+            cleaned = cleaned[len("Bluetooth ("):-1].strip()
+        else:
+            if cleaned.endswith(" Audio"):
+                cleaned = cleaned[:-6]
+            cleaned = cleaned.replace("Audio ", "")
+            if "/" in cleaned and ("HDMI" in cleaned or "DisplayPort" in cleaned):
+                parts = [p.strip() for p in cleaned.split("/")]
+                cleaned = parts[-1]
+            if "(" in cleaned and len(cleaned) > 20:
+                cleaned = cleaned.split("(")[0].strip()
+        return cleaned[:22].strip()
 
     def _sync_state(self):
         self._updating_ui = True
@@ -246,9 +282,12 @@ class SpeakerCard(Gtk.Box):
     def _on_delay_changed(self, scale):
         val = scale.get_value()
         self.channel.delay_ms = round(val, 1)
-        # 1ms ~ 0.343m
-        dist_m = self.channel.delay_ms * 0.343
-        self.delay_badge.set_text(f"{self.channel.delay_ms:.1f}ms ({dist_m:.1f}m)")
+        hw_lat = getattr(self.channel, "hardware_latency_ms", 0.0)
+        if hw_lat > 0:
+            self.delay_badge.set_text(f"{self.channel.delay_ms:.0f}ms (HW:{hw_lat:.0f}ms)")
+        else:
+            dist_m = self.channel.delay_ms * 0.343
+            self.delay_badge.set_text(f"{self.channel.delay_ms:.1f}ms ({dist_m:.1f}m)")
         # Debounce: only notify config change after 300ms of inactivity
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
@@ -259,6 +298,101 @@ class SpeakerCard(Gtk.Box):
         self.on_change()
         return False  # Remove timeout
 
+    def _setup_rename_popover(self):
+        self.popover = Gtk.Popover()
+        self.popover.set_parent(self.edit_btn)
+        self.popover.set_autohide(True)
+        # Compatibility attribute so card.edit_btn.get_popover() returns self.popover
+        self.edit_btn.get_popover = lambda: self.popover
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        content.set_margin_top(10)
+        content.set_margin_bottom(10)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
+        content.set_size_request(230, -1)
+
+        pop_title = Gtk.Label(label="Personalizza etichetta")
+        pop_title.add_css_class("heading")
+        pop_title.set_halign(Gtk.Align.START)
+        content.append(pop_title)
+
+        hw_name = self.channel.display_name or self.channel.sink_name
+        hw_label = Gtk.Label(label=f"Hardware: {self._short_name(hw_name)}")
+        hw_label.add_css_class("dim-label")
+        hw_label.set_ellipsize(3)
+        hw_label.set_halign(Gtk.Align.START)
+        content.append(hw_label)
+
+        self.name_entry = Gtk.Entry()
+        self.name_entry.set_placeholder_text("Es. Monitor Studio, Cuffie...")
+        if self.channel.custom_name:
+            self.name_entry.set_text(self.channel.custom_name)
+        self.name_entry.connect("activate", lambda e: self._on_save_custom_name(self.popover))
+        content.append(self.name_entry)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        btn_box.set_halign(Gtk.Align.END)
+
+        reset_btn = Gtk.Button(label="Ripristina")
+        reset_btn.set_tooltip_text("Ripristina nome predefinito dell'hardware")
+        reset_btn.add_css_class("flat")
+        reset_btn.connect("clicked", lambda b: self._on_reset_custom_name(self.popover))
+        btn_box.append(reset_btn)
+
+        save_btn = Gtk.Button(label="Salva")
+        save_btn.add_css_class("suggested-action")
+        save_btn.connect("clicked", lambda b: self._on_save_custom_name(self.popover))
+        btn_box.append(save_btn)
+
+        content.append(btn_box)
+        self.popover.set_child(content)
+        self.popover.connect("show", self._on_popover_show)
+
+    def _on_popover_show(self, popover):
+        if self.channel.custom_name:
+            self.name_entry.set_text(self.channel.custom_name)
+        else:
+            self.name_entry.set_text("")
+        self.name_entry.grab_focus()
+
+    def _get_display_title(self) -> str:
+        if self.channel.custom_name:
+            return self.channel.custom_name[:22]
+        return self._short_name(self.channel.display_name or self.channel.sink_name)
+
+    def _get_title_tooltip(self) -> str:
+        hw_name = self.channel.display_name or self.channel.sink_name
+        if self.channel.custom_name:
+            return f"{self.channel.custom_name}\n(Dispositivo: {hw_name})"
+        return hw_name
+
+    def _on_save_custom_name(self, popover):
+        text = self.name_entry.get_text().strip()
+        hw_name = self.channel.display_name or self.channel.sink_name
+        if text and text != hw_name:
+            self.channel.custom_name = text
+            self.title_label.add_css_class("strip-title-custom")
+        else:
+            self.channel.custom_name = None
+            self.title_label.remove_css_class("strip-title-custom")
+
+        self.title_label.set_text(self._get_display_title())
+        self.title_label.set_tooltip_text(self._get_title_tooltip())
+        popover.popdown()
+        self.on_change()
+
+    def _on_reset_custom_name(self, popover):
+        self.channel.custom_name = None
+        self.name_entry.set_text("")
+        self.title_label.remove_css_class("strip-title-custom")
+        self.title_label.set_text(self._get_display_title())
+        self.title_label.set_tooltip_text(self._get_title_tooltip())
+        popover.popdown()
+        self.on_change()
+
     def _on_test_clicked(self, btn):
         target = self.channel.sink_name or str(self.channel.sink_id)
-        self.on_test(target, self.channel.display_name or self.channel.sink_name)
+        display_label = self.channel.custom_name or self.channel.display_name or self.channel.sink_name
+        self.on_test(target, display_label)
+

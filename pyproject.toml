@@ -35,9 +35,14 @@ dependencies = [
 [project.scripts]
 polifonia = "main:main"
 
+[tool.setuptools]
+py-modules = ["main"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["core*", "backend*", "services*", "storage*", "ui*"]
 
 [tool.setuptools.package-data]
-"ui" = ["styles/*.css"]
+"ui" = ["styles/*.css", "tray/*.py"]
+"*" = ["assets/*", "assets/tray/*"]
+

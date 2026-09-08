@@ -119,6 +119,49 @@ headerbar {
     margin-top: 4px;
 }
 
+/* Channel Strip Custom Title & Edit Button */
+.strip-title-custom {
+    color: #00e5ff;
+}
+
+button.strip-edit-btn,
+.strip-edit-btn {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 2px 4px;
+    margin-top: 2px;
+    opacity: 0.55;
+    border-radius: 5px;
+    color: #94a3b8;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    transition: all 150ms ease;
+}
+
+button.strip-edit-btn:hover,
+.strip-edit-btn:hover {
+    opacity: 1.0;
+    color: #00e5ff;
+    background: rgba(0, 229, 255, 0.12);
+    box-shadow: none;
+    outline: none;
+    border: none;
+}
+
+button.strip-edit-btn:active,
+button.strip-edit-btn:checked,
+.strip-edit-btn:active,
+.strip-edit-btn:checked {
+    opacity: 1.0;
+    color: #00e5ff;
+    background: rgba(0, 229, 255, 0.22);
+    box-shadow: none;
+    outline: none;
+    border: none;
+}
+
 .strip-section-label {
     font-size: 10px;
     font-weight: 800;

@@ -29,6 +29,8 @@ class AudioSink:
     is_internal: bool = False
     volume: float = 1.0
     mute: bool = False
+    latency_ms: float = 0.0
+    bus_type: str = "other"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -42,10 +44,12 @@ class SpeakerConfig:
     display_name: str = ""
     role: SpeakerRole = SpeakerRole.EXCLUDED
     volume_gain: float = 1.0  # Multiplier (0.0 to 1.5)
-    delay_ms: float = 0.0     # Time-alignment delay in milliseconds (0 to 100ms)
+    delay_ms: float = 0.0     # Time-alignment delay in milliseconds (0 to 300ms)
     mute: bool = False
     custom_name: Optional[str] = None
     phase_inverted: bool = False
+    hardware_latency_ms: float = 0.0
+    bus_type: str = "other"
 
     @property
     def id(self) -> int:
@@ -81,7 +85,9 @@ class SpeakerConfig:
             "delay_ms": self.delay_ms,
             "mute": self.mute,
             "custom_name": self.custom_name,
-            "phase_inverted": self.phase_inverted
+            "phase_inverted": self.phase_inverted,
+            "hardware_latency_ms": self.hardware_latency_ms,
+            "bus_type": self.bus_type
         }
 
     @classmethod
@@ -101,7 +107,9 @@ class SpeakerConfig:
             delay_ms=float(d.get("delay_ms", 0.0)),
             mute=bool(d.get("mute", False)),
             custom_name=d.get("custom_name"),
-            phase_inverted=bool(d.get("phase_inverted", False))
+            phase_inverted=bool(d.get("phase_inverted", False)),
+            hardware_latency_ms=float(d.get("hardware_latency_ms", 0.0)),
+            bus_type=str(d.get("bus_type", "other"))
         )
 
 

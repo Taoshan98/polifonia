@@ -133,6 +133,104 @@ class TestUI(unittest.TestCase):
         win._on_tray_set_channel_volume("alsa_output.pci.hdmi1", 0.75)
         self.assertEqual(win.config.channels[0].volume_gain, 0.75)
 
+    def test_speaker_card_custom_label_editing_and_reset(self):
+        """Verify custom label assignment, UI visual badge, and reset to hardware default."""
+        channel = SpeakerConfig(
+            sink_id=42,
+            sink_name="alsa_output.pci.hdmi_stereo",
+            display_name="HDMI / DisplayPort 2 Audio",
+            role=SpeakerRole.LEFT
+        )
+        on_change_mock = MagicMock()
+        on_test_mock = MagicMock()
+
+        card = SpeakerCard(channel, on_change_mock, on_test_mock)
+
+        # 1. Initial state (no custom name)
+        self.assertIsNone(channel.custom_name)
+        self.assertEqual(card._get_display_title(), "DisplayPort 2")
+        self.assertFalse(card.title_label.has_css_class("strip-title-custom"))
+
+        # 2. Save custom name
+        card.name_entry.set_text("Studio Left Main")
+        popover = card.edit_btn.get_popover()
+        card._on_save_custom_name(popover)
+
+        self.assertEqual(channel.custom_name, "Studio Left Main")
+        self.assertEqual(card._get_display_title(), "Studio Left Main")
+        self.assertEqual(card.title_label.get_text(), "Studio Left Main")
+        self.assertTrue(card.title_label.has_css_class("strip-title-custom"))
+        self.assertIn("Studio Left Main", card._get_title_tooltip())
+        self.assertIn("HDMI / DisplayPort 2 Audio", card._get_title_tooltip())
+        self.assertTrue(on_change_mock.called)
+
+        # 3. Test button uses custom label in toast notification
+        card._on_test_clicked(None)
+        on_test_mock.assert_called_with("alsa_output.pci.hdmi_stereo", "Studio Left Main")
+
+        # 4. Reset custom name to default
+        on_change_mock.reset_mock()
+        card._on_reset_custom_name(popover)
+
+        self.assertIsNone(channel.custom_name)
+        self.assertEqual(card._get_display_title(), "DisplayPort 2")
+        self.assertFalse(card.title_label.has_css_class("strip-title-custom"))
+        self.assertTrue(on_change_mock.called)
+
+    def test_main_window_custom_name_preservation_across_disconnects(self):
+        """Verify MainWindow preserves custom names and offline endpoints across live sink scans."""
+        mock_audio_service = MagicMock()
+        mock_audio_service.get_available_sinks.return_value = [
+            AudioSink(id=1, name="sink.alpha", description="Alpha Monitor", media_class="Audio/Sink"),
+            AudioSink(id=2, name="sink.beta", description="Beta Bluetooth", media_class="Audio/Sink", bus_type="bluetooth")
+        ]
+        mock_audio_service.is_running.return_value = False
+
+        mock_preset_manager = MagicMock()
+        mock_preset_manager.load_config.return_value = SystemConfig()
+
+        win = MainWindow(self.app, mock_audio_service, mock_preset_manager)
+
+        # Personalize Beta Bluetooth sink
+        beta_ch = next(c for c in win.config.channels if c.sink_name == "sink.beta")
+        beta_ch.custom_name = "Cuffie Ufficio"
+        beta_ch.delay_ms = 180.0
+
+        # Tray should serialize custom name
+        tray_channels = win._serialize_channels_for_tray()
+        beta_tray = next(c for c in tray_channels if c["sink_name"] == "sink.beta")
+        self.assertEqual(beta_tray["display_name"], "Cuffie Ufficio")
+
+        # Simulate Beta device disconnecting (Bluetooth turned off / unplugged)
+        mock_audio_service.get_available_sinks.return_value = [
+            AudioSink(id=1, name="sink.alpha", description="Alpha Monitor", media_class="Audio/Sink")
+        ]
+        win._sync_live_sinks()
+        win._populate_rack()
+
+        # Rack only shows online card
+        self.assertEqual(len(win._speaker_cards), 1)
+
+        # Config STILL preserves offline Beta device with custom_name
+        saved_beta = next(c for c in win.config.channels if c.sink_name == "sink.beta")
+        self.assertEqual(saved_beta.custom_name, "Cuffie Ufficio")
+        self.assertEqual(saved_beta.delay_ms, 180.0)
+
+        # Simulate Beta device reconnecting
+        mock_audio_service.get_available_sinks.return_value = [
+            AudioSink(id=1, name="sink.alpha", description="Alpha Monitor", media_class="Audio/Sink"),
+            AudioSink(id=99, name="sink.beta", description="Beta Bluetooth", media_class="Audio/Sink", bus_type="bluetooth")
+        ]
+        win._sync_live_sinks()
+        win._populate_rack()
+
+        self.assertEqual(len(win._speaker_cards), 2)
+        reconnected_beta = next(c for c in win.config.channels if c.sink_name == "sink.beta")
+        self.assertEqual(reconnected_beta.sink_id, 99)
+        self.assertEqual(reconnected_beta.custom_name, "Cuffie Ufficio")
+        self.assertEqual(reconnected_beta.delay_ms, 180.0)
+
+
 
 if __name__ == "__main__":
     unittest.main()

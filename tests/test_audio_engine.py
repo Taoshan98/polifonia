@@ -164,6 +164,82 @@ class TestAudioEngine(unittest.TestCase):
             self.assertTrue(res_deact)
             self.assertTrue(mock_stop.called)
 
+    def test_bluetooth_loopback_parameters(self):
+        """Verify Bluetooth loopback does not use node.passive=true and does not force -l 15."""
+        self.service.config.channels = [
+            SpeakerConfig(
+                sink_id=139,
+                sink_name="bluez_output.4C_87_5D_9F_7E_60.1",
+                role=SpeakerRole.STEREO,
+                bus_type="bluetooth",
+                hardware_latency_ms=180.0
+            )
+        ]
+        mock_proc = MagicMock(poll=MagicMock(return_value=None))
+        with patch.object(self.service, "_ensure_master_sink", return_value=True), \
+             patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
+             patch("subprocess.run"):
+            self.service.start_unison_sink()
+            self.assertTrue(self.service.is_running())
+            self.assertEqual(mock_popen.call_count, 1)
+
+            bt_cmd = mock_popen.call_args[0][0]
+            self.assertIn("pw-loopback", bt_cmd)
+            # Must NOT be passive
+            self.assertTrue(any("node.passive=false" in arg for arg in bt_cmd))
+            self.assertFalse(any("node.passive=true" in arg for arg in bt_cmd))
+            # Must NOT force -l 15
+            self.assertNotIn("-l", bt_cmd)
+
+    def test_auto_latency_compensation_between_monitor_and_bluetooth(self):
+        """Verify faster monitor sink is automatically delayed to match higher-latency Bluetooth sink."""
+        self.service.config.channels = [
+            SpeakerConfig(
+                sink_id=62,
+                sink_name="alsa_output.pci-gpu.pro-output-3",
+                role=SpeakerRole.LEFT,
+                delay_ms=0.0,
+                bus_type="hdmi",
+                hardware_latency_ms=10.0
+            ),
+            SpeakerConfig(
+                sink_id=139,
+                sink_name="bluez_output.4C_87_5D_9F_7E_60.1",
+                role=SpeakerRole.RIGHT,
+                delay_ms=0.0,
+                bus_type="bluetooth",
+                hardware_latency_ms=180.0
+            )
+        ]
+        mock_proc1 = MagicMock(poll=MagicMock(return_value=None))
+        mock_proc2 = MagicMock(poll=MagicMock(return_value=None))
+        with patch.object(self.service, "_ensure_master_sink", return_value=True), \
+             patch("subprocess.Popen", side_effect=[mock_proc1, mock_proc2]) as mock_popen, \
+             patch("subprocess.run"):
+            self.service.start_unison_sink()
+            self.assertEqual(mock_popen.call_count, 2)
+
+            cmd_map = {}
+            for call_args in mock_popen.call_args_list:
+                cmd = call_args[0][0]
+                for arg in cmd:
+                    if "polifonia_play_62" in arg:
+                        cmd_map["monitor"] = cmd
+                    elif "polifonia_play_139" in arg:
+                        cmd_map["bluetooth"] = cmd
+
+            # Monitor has 10ms HW latency, BT has 180ms -> Monitor receives 170ms auto delay
+            self.assertIn("monitor", cmd_map)
+            mon_cmd = cmd_map["monitor"]
+            self.assertIn("--delay", mon_cmd)
+            delay_idx = mon_cmd.index("--delay")
+            self.assertEqual(mon_cmd[delay_idx + 1], "0.1700")
+
+            # Bluetooth has max HW latency -> no extra delay
+            self.assertIn("bluetooth", cmd_map)
+            bt_cmd = cmd_map["bluetooth"]
+            self.assertNotIn("--delay", bt_cmd)
+
     def test_alias_audio_service(self):
         """Verify AudioService is an alias to AudioEngineService."""
         self.assertIs(AudioService, AudioEngineService)
@@ -171,3 +247,4 @@ class TestAudioEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
