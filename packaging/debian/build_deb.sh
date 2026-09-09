@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Polifonia Audio Studio - Debian / Ubuntu Package Builder
+# Polifonia - Debian / Ubuntu Package Builder
 set -e
 
-VERSION="1.0.0"
+VERSION="${1:-${VERSION:-1.0.5}}"
 PKG_DIR="build/debian_pkg"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -13,6 +13,7 @@ mkdir -p "${PKG_DIR}/usr/bin"
 mkdir -p "${PKG_DIR}/usr/lib/polifonia"
 mkdir -p "${PKG_DIR}/usr/share/applications"
 mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps"
+mkdir -p "${PKG_DIR}/usr/share/metainfo"
 mkdir -p "${PKG_DIR}/usr/share/doc/polifonia"
 
 # Copy debian control file
@@ -36,9 +37,10 @@ EOF
 chmod 755 "${PKG_DIR}/usr/bin/polifonia"
 
 # Copy desktop launcher and icons
-cp "${ROOT_DIR}/io.polifonia.AudioStudio.desktop" "${PKG_DIR}/usr/share/applications/"
-cp "${ROOT_DIR}/assets/io.polifonia.AudioStudio.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
-cp "${ROOT_DIR}/assets/io.polifonia.AudioStudio-symbolic.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
+cp "${ROOT_DIR}/io.github.taoshan98.Polifonia.desktop" "${PKG_DIR}/usr/share/applications/"
+cp "${ROOT_DIR}/assets/io.github.taoshan98.Polifonia.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
+cp "${ROOT_DIR}/assets/io.github.taoshan98.Polifonia-symbolic.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
+cp "${ROOT_DIR}/io.github.taoshan98.Polifonia.metainfo.xml" "${PKG_DIR}/usr/share/metainfo/" 2>/dev/null || true
 cp "${ROOT_DIR}/README.md" "${PKG_DIR}/usr/share/doc/polifonia/"
 cp "${ROOT_DIR}/LICENSE" "${PKG_DIR}/usr/share/doc/polifonia/copyright"
 

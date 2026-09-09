@@ -44,20 +44,20 @@ class TrayIndicatorApp:
 
         if icon_dir:
             self.indicator = AppIndicator.Indicator.new_with_path(
-                "polifonia_audio_tray",
+                "polifonia_tray",
                 "polifonia-tray",
                 AppIndicator.IndicatorCategory.APPLICATION_STATUS,
                 icon_dir
             )
         else:
             self.indicator = AppIndicator.Indicator.new(
-                "polifonia_audio_tray",
+                "polifonia_tray",
                 "audio-speakers-symbolic",
                 AppIndicator.IndicatorCategory.APPLICATION_STATUS
             )
 
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
-        self.indicator.set_title("Polifonia Audio Studio")
+        self.indicator.set_title("Polifonia")
 
         self.menu = Gtk.Menu()
         self._rebuild_menu()

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Polifonia Audio Studio - AppImage Builder Script
+# Polifonia - AppImage Builder Script
 set -e
 
+VERSION="${1:-${VERSION:-1.0.5}}"
 APP_DIR="build/AppDir"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-echo "=== Building Polifonia AppImage ==="
+echo "=== Building Polifonia AppImage (${VERSION}) ==="
 rm -rf "${APP_DIR}"
 mkdir -p "${APP_DIR}/usr/bin"
 mkdir -p "${APP_DIR}/usr/share/applications"
@@ -20,12 +21,14 @@ cp -r "${ROOT_DIR}/ui" "${APP_DIR}/"
 cp "${ROOT_DIR}/main.py" "${APP_DIR}/"
 
 # Copy metadata and icons
-cp "${ROOT_DIR}/io.polifonia.AudioStudio.desktop" "${APP_DIR}/"
-cp "${ROOT_DIR}/io.polifonia.AudioStudio.desktop" "${APP_DIR}/usr/share/applications/"
-cp "${ROOT_DIR}/assets/io.polifonia.AudioStudio.svg" "${APP_DIR}/io.polifonia.AudioStudio.svg"
-cp "${ROOT_DIR}/assets/io.polifonia.AudioStudio.svg" "${APP_DIR}/usr/share/icons/hicolor/scalable/apps/"
+cp "${ROOT_DIR}/io.github.taoshan98.Polifonia.desktop" "${APP_DIR}/"
+cp "${ROOT_DIR}/io.github.taoshan98.Polifonia.desktop" "${APP_DIR}/usr/share/applications/"
+cp "${ROOT_DIR}/assets/io.github.taoshan98.Polifonia.svg" "${APP_DIR}/io.github.taoshan98.Polifonia.svg"
+cp "${ROOT_DIR}/assets/io.github.taoshan98.Polifonia.svg" "${APP_DIR}/usr/share/icons/hicolor/scalable/apps/"
+cp "${ROOT_DIR}/assets/io.github.taoshan98.Polifonia-symbolic.svg" "${APP_DIR}/usr/share/icons/hicolor/scalable/apps/"
+cp "${ROOT_DIR}/assets/io.github.taoshan98.Polifonia.svg" "${APP_DIR}/.DirIcon"
 cp "${ROOT_DIR}/packaging/appimage/AppRun" "${APP_DIR}/AppRun"
 chmod +x "${APP_DIR}/AppRun"
 
 echo "AppDir structure prepared at ${APP_DIR}."
-echo "Use appimagetool to generate the final bundle: appimagetool ${APP_DIR} Polifonia-x86_64.AppImage"
+echo "Use appimagetool to generate the final bundle: appimagetool ${APP_DIR} Polifonia-${VERSION}-x86_64.AppImage"

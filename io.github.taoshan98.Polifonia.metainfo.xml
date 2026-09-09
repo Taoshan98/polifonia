@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.taoshan98.Polifonia</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Polifonia</name>
+  <summary>Multi-Speaker and Multi-Monitor Audio Unison Engine for Linux</summary>
+  
+  <description>
+    <p>
+      Polifonia is an advanced, PipeWire-native multi-speaker audio compositing
+      and acoustic DSP management system for Linux desktops.
+    </p>
+    <p>
+      It enables workstations with heterogeneous multi-monitor setups (HDMI or DisplayPort
+      integrated screen speakers, USB audio DACs, auxiliary subwoofers, and analog outputs)
+      to aggregate disparate physical outputs into a unified, phase-aligned, frequency-filtered
+      multichannel virtual soundstage.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Dynamic hardware discovery for multi-monitor displays, DACs, and auxiliary speakers</li>
+      <li>Sample-accurate delay compensation for acoustic distance delta and hardware buffer alignment</li>
+      <li>Active 2.1 acoustic crossover DSP with Linkwitz-Riley filters</li>
+      <li>Horizontal mixing console UI built with modern GTK4 and Libadwaita</li>
+      <li>System tray companion indicator for quick volume control and unison toggle</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.taoshan98.Polifonia.desktop</launchable>
+
+  <url type="homepage">https://github.com/Taoshan98/polifonia</url>
+  <url type="bugtracker">https://github.com/Taoshan98/polifonia/issues</url>
+  <url type="vcs-browser">https://github.com/Taoshan98/polifonia</url>
+
+  <developer id="io.github.taoshan98">
+    <name>Polifonia Contributors</name>
+  </developer>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/Taoshan98/polifonia/master/assets/io.github.taoshan98.Polifonia.svg</image>
+      <caption>Polifonia Audio Studio interface</caption>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="1.0.6" date="2026-09-10">
+      <description>
+        <p>Standardized project naming to Polifonia, added AppStream metadata and Flathub distribution support.</p>
+      </description>
+    </release>
+    <release version="1.0.5" date="2026-09-09">
+      <description>
+        <p>Added device bus detection, latency estimation, and custom labeling UI for audio sinks.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1" />
+</component>

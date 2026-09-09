@@ -23,7 +23,7 @@ from ui.views.main_window import MainWindow
 class PolifoniaApplication(Adw.Application):
     def __init__(self):
         super().__init__(
-            application_id="io.polifonia.AudioStudio",
+            application_id="io.github.taoshan98.Polifonia",
             flags=Gio.ApplicationFlags.NON_UNIQUE
         )
         self.settings_store = SettingsStore()

@@ -26,8 +26,9 @@
       ],
       "sources": [
         {
-          "type": "dir",
-          "path": "../.."
+          "type": "archive",
+          "url": "https://github.com/Taoshan98/polifonia/archive/refs/tags/v1.0.5.tar.gz",
+          "sha256": "1ad6ca93a5eff097efbaed2f0bcb39eea405ddc252a2f316b0fe8c9dcb22973c"
         }
       ]
     }

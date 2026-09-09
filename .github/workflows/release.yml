@@ -6,6 +6,11 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
+      version:
+        description: 'Release version (e.g. 1.0.5 or v1.0.5; leave empty for auto-detection)'
+        required: false
+        type: string
+        default: ''
       create_release:
         description: 'Create a GitHub Release with the built assets'
         required: true
@@ -29,6 +34,27 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Determine Release Version
+        id: get_version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            RAW_VER="${{ inputs.version }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            RAW_VER="${GITHUB_REF_NAME}"
+          else
+            RAW_VER=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          fi
+          
+          # Clean version without leading 'v' (e.g. 1.0.5)
+          VERSION="${RAW_VER#v}"
+          TAG_NAME="v${VERSION}"
+          
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "Building Polifonia release version: ${VERSION} (Tag: ${TAG_NAME})"
+
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
@@ -48,43 +74,55 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel build
           pip install PyGObject
+          
+          # Ensure pyproject.toml has the matching release version and name
+          python3 -c "
+          import re
+          with open('pyproject.toml', 'r') as f:
+              content = f.read()
+          content = re.sub(r'name\s*=\s*\"[^\"]+\"', 'name = \"polifonia\"', content, count=1)
+          content = re.sub(r'version\s*=\s*\"[^\"]+\"', f'version = \"${{ env.VERSION }}\"', content, count=1)
+          with open('pyproject.toml', 'w') as f:
+              f.write(content)
+          "
+          
           python -m build
           mkdir -p dist/packages
-          cp dist/*.whl dist/*.tar.gz dist/packages/
+          cp dist/polifonia-${{ env.VERSION }}*.whl dist/polifonia-${{ env.VERSION }}*.tar.gz dist/packages/
 
-      - name: Build Debian Package (.deb)
-        run: |
-          chmod +x packaging/debian/build_deb.sh
-          ./packaging/debian/build_deb.sh
-          mv *.deb dist/packages/
+      # Debian package build temporarily commented out while preparing dedicated PPA/APT repo
+      # - name: Build Debian Package (.deb)
+      #   run: |
+      #     chmod +x packaging/debian/build_deb.sh
+      #     ./packaging/debian/build_deb.sh "${{ env.VERSION }}"
+      #     mv polifonia_${{ env.VERSION }}_all.deb dist/packages/
 
       - name: Build AppImage (.AppImage)
         run: |
           chmod +x packaging/appimage/build_appimage.sh
-          ./packaging/appimage/build_appimage.sh
+          ./packaging/appimage/build_appimage.sh "${{ env.VERSION }}"
           
           # Download appimagetool
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
           
-          # Build final AppImage
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run build/AppDir dist/packages/Polifonia-x86_64.AppImage
+          # Build final AppImage with reference version in the filename
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run build/AppDir "dist/packages/Polifonia-${{ env.VERSION }}-x86_64.AppImage"
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-packages
+          name: release-packages-${{ env.VERSION }}
           path: dist/packages/*
 
       - name: Create GitHub Release & Upload Assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || inputs.create_release == true
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Polifonia ${{ github.ref_name }}
+          tag_name: ${{ env.TAG_NAME }}
+          name: Polifonia ${{ env.TAG_NAME }}
           draft: false
           prerelease: false
           generate_release_notes: true
           files: |
             dist/packages/*
-

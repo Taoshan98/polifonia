@@ -20,7 +20,7 @@ class TestUI(unittest.TestCase):
     def setUpClass(cls):
         Adw.init()
         cls.app = Adw.Application(
-            application_id="io.polifonia.TestApp",
+            application_id="io.github.taoshan98.Polifonia.TestApp",
             flags=Gio.ApplicationFlags.FLAGS_NONE
         )
 

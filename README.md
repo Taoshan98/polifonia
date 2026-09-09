@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/io.polifonia.AudioStudio.svg" width="130" height="130" alt="Polifonia Audio Studio Logo">
+  <img src="assets/io.github.taoshan98.Polifonia.svg" width="130" height="130" alt="Polifonia Logo">
 </p>
 
 <h1 align="center">Polifonia Audio Studio</h1>
@@ -12,7 +12,7 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://pipewire.org"><img src="https://img.shields.io/badge/Platform-Linux%20%28PipeWire%29-orange.svg" alt="Platform: Linux PipeWire"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg" alt="Python 3.10+"></a>
-  <a href="#packaging--distribution"><img src="https://img.shields.io/badge/Packages-Flatpak%20%7C%20AppImage%20%7C%20DEB%20%7C%20RPM-purple.svg" alt="Packages"></a>
+  <a href="#packaging--distribution"><img src="https://img.shields.io/badge/Packages-Flatpak%20%7C%20AppImage-purple.svg" alt="Packages"></a>
 </p>
 
 ---
@@ -82,14 +82,15 @@ polifonia/
 │       ├── tray_service.py    # Tray manager
 │       └── tray_indicator.py  # System tray indicator process
 ├── packaging/
-│   ├── flatpak/               # Flathub manifest (io.polifonia.AudioStudio.json)
+│   ├── flatpak/               # Flathub manifest (io.github.taoshan98.Polifonia.json)
 │   ├── appimage/              # AppImage AppRun and build script
 │   ├── debian/                # Debian / Ubuntu package control files
 │   └── rpm/                   # Fedora / openSUSE RPM specfile
 ├── assets/
-│   └── io.polifonia.AudioStudio.svg  # High-resolution vector icon
+│   └── io.github.taoshan98.Polifonia.svg  # High-resolution vector icon
 ├── pyproject.toml             # Standard PEP 621 Python package configuration
-├── io.polifonia.AudioStudio.desktop # FreeDesktop XDG launcher entry
+├── io.github.taoshan98.Polifonia.desktop # FreeDesktop XDG launcher entry
+├── io.github.taoshan98.Polifonia.metainfo.xml # AppStream metadata
 ├── main.py                    # Application entrypoint
 └── README.md
 ```
@@ -168,30 +169,42 @@ polifonia
 
 ## Packaging & Distribution
 
-Polifonia provides ready-to-use configurations for all major Linux distribution channels:
+Polifonia focuses on universal, cross-distribution delivery formats:
 
-### 1. Flatpak (Flathub)
+### 1. Flatpak (Flathub) — *Recommended*
+Flathub is the primary desktop distribution channel for Polifonia across all Linux distributions (GNOME, Fedora, Ubuntu, Arch, SteamOS):
+
 ```bash
-flatpak-builder --user --install --force-clean build-dir packaging/flatpak/io.polifonia.AudioStudio.json
-flatpak run io.polifonia.AudioStudio
+# Install via Flatpak / Flathub
+flatpak install flathub io.github.taoshan98.Polifonia
+
+# Run application
+flatpak run io.github.taoshan98.Polifonia
 ```
 
-### 2. AppImage
+Or search for **Polifonia** directly in GNOME Software or KDE Discover.
+
+### 2. AppImage (Standalone Portable Bundle)
+For users who prefer a single standalone portable executable without containerization:
+
+1. Download `Polifonia-<version>-x86_64.AppImage` from [GitHub Releases](https://github.com/Taoshan98/polifonia/releases).
+2. Make it executable and run:
+   ```bash
+   chmod +x Polifonia-*-x86_64.AppImage
+   ./Polifonia-*-x86_64.AppImage
+   ```
+
+To build locally:
 ```bash
 ./packaging/appimage/build_appimage.sh
-# Generate bundle with appimagetool:
+# Generate bundle using appimagetool:
 appimagetool build/AppDir Polifonia-x86_64.AppImage
 ```
 
-### 3. Debian / Ubuntu (.deb)
-```bash
-dpkg-buildpackage -us -uc -b
-```
+---
 
-### 4. Fedora / RHEL / openSUSE (.rpm)
-```bash
-rpmbuild -ba packaging/rpm/polifonia.spec
-```
+### Roadmap (Native Distro Repositories)
+Native package specifications (`packaging/aur/`, `packaging/debian/`, `packaging/rpm/`) are maintained in the repository and will be activated on respective community repositories (Arch AUR, Ubuntu PPA, Fedora COPR) in upcoming releases.
 
 ---
 
