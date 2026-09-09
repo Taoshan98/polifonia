@@ -27,8 +27,8 @@
       "sources": [
         {
           "type": "archive",
-          "url": "https://github.com/Taoshan98/polifonia/archive/refs/tags/v1.0.5.tar.gz",
-          "sha256": "1ad6ca93a5eff097efbaed2f0bcb39eea405ddc252a2f316b0fe8c9dcb22973c"
+          "url": "https://github.com/Taoshan98/polifonia/archive/refs/tags/v1.0.6.tar.gz",
+          "sha256": "4aacc3a757d6cad7080f84c244b88ab016fce2a842299f4c25f3f9a1ebfb36be"
         }
       ]
     }
