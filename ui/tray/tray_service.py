@@ -37,6 +37,9 @@ class TrayService:
         self._running = False
         self._reader_thread: Optional[threading.Thread] = None
 
+        import atexit
+        atexit.register(self.stop)
+
     def start(self):
         """Starts the tray indicator companion process."""
         if self._running:
@@ -46,6 +49,13 @@ class TrayService:
         if not os.path.exists(indicator_script):
             return
 
+        def _set_pdeathsig():
+            try:
+                import ctypes, signal
+                ctypes.CDLL("libc.so.6").prctl(1, signal.SIGTERM)
+            except Exception:
+                pass
+
         try:
             self.proc = subprocess.Popen(
                 [sys.executable, indicator_script],
@@ -53,7 +63,8 @@ class TrayService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                preexec_fn=_set_pdeathsig
             )
             self._running = True
             self._reader_thread = threading.Thread(target=self._read_stdout, daemon=True)

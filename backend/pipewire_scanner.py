@@ -83,6 +83,8 @@ class DeviceScanner:
         try:
             output = subprocess.check_output(["pw-dump"], text=True)
             objects = json.loads(output)
+            if not isinstance(objects, list):
+                return sinks
         except Exception:
             return sinks
 
@@ -119,9 +121,31 @@ class DeviceScanner:
             # Dynamic Classification
             is_internal = False
             is_digital_hdmi = "hdmi" in name_lower or "pro-output" in name_lower or "iec958" in name_lower
+            is_bluetooth = (
+                bus == "bluetooth" or 
+                "bluez" in name_lower or 
+                "bluez" in props.get("device.api", "").lower() or
+                "bluetooth" in props.get("device.icon_name", "").lower()
+            )
             bus_type = "other"
 
-            if is_digital_hdmi:
+            if is_bluetooth:
+                clean_name = (
+                    props.get("device.alias") or 
+                    props.get("device.description") or 
+                    props.get("node.description") or 
+                    props.get("media.name") or 
+                    props.get("node.nick") or 
+                    props.get("device.product.name") or 
+                    "Bluetooth Device"
+                ).strip()
+                for prefix in ["Bluetooth Audio (", "Bluetooth ("]:
+                    if clean_name.startswith(prefix) and clean_name.endswith(")"):
+                        clean_name = clean_name[len(prefix):-1].strip()
+                description = clean_name
+                bus_type = "bluetooth"
+                is_internal = False
+            elif is_digital_hdmi:
                 bus_type = "hdmi"
                 c_num = int(card_id) if card_id is not None else None
                 if c_num is not None and c_num in eld_map:
@@ -137,33 +161,18 @@ class DeviceScanner:
                 else:
                     # Unconnected HDMI/DP port on card without active ELD
                     continue
-            elif "speaker" in raw_desc_lower or "speaker" in name_lower or form_factor == "internal":
-                description = "Integrated Speakers (Internal)"
-                is_internal = True
-                bus_type = "internal"
-            elif "headphone" in raw_desc_lower or "headphone" in name_lower:
-                clean_name = props.get("node.nick") or props.get("device.product.name") or "Analog"
-                description = f"Headphones / Audio Jack ({clean_name})"
-                bus_type = "jack"
             elif bus == "usb" or "usb" in name_lower:
                 clean_name = props.get("node.nick") or props.get("device.product.name") or raw_desc.replace("Analog Stereo", "").replace("Stereo analogico", "").strip()
                 description = f"USB Audio ({clean_name})"
                 bus_type = "usb"
-            elif bus == "bluetooth" or "bluez" in name_lower:
-                clean_name = (
-                    props.get("node.description") or 
-                    props.get("media.name") or 
-                    props.get("device.alias") or 
-                    props.get("node.nick") or 
-                    props.get("device.product.name") or 
-                    props.get("device.description") or 
-                    "Bluetooth Device"
-                ).strip()
-                for prefix in ["Bluetooth Audio (", "Bluetooth ("]:
-                    if clean_name.startswith(prefix) and clean_name.endswith(")"):
-                        clean_name = clean_name[len(prefix):-1].strip()
-                description = f"Bluetooth Audio ({clean_name})"
-                bus_type = "bluetooth"
+            elif "headphone" in raw_desc_lower or "headphone" in name_lower:
+                clean_name = props.get("node.nick") or props.get("device.product.name") or "Analog"
+                description = f"Headphones / Audio Jack ({clean_name})"
+                bus_type = "jack"
+            elif "speaker" in raw_desc_lower or "speaker" in name_lower or form_factor == "internal":
+                description = "Integrated Speakers (Internal)"
+                is_internal = True
+                bus_type = "internal"
             else:
                 description = raw_desc
                 bus_type = bus or "pci"
@@ -220,6 +229,84 @@ class DeviceScanner:
     @classmethod
     def get_available_sinks(cls) -> List[AudioSink]:
         return cls.scan_sinks()
+
+    @classmethod
+    def get_sink_states(cls) -> dict:
+        """Returns a mapping of sink ID and sink name to playback state (e.g. 'RUNNING', 'SUSPENDED', 'IDLE')."""
+        states = {}
+        try:
+            res = subprocess.run(["pactl", "list", "sinks", "short"], capture_output=True, text=True, timeout=0.8)
+            for line in res.stdout.splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 5:
+                    s_id = parts[0]
+                    s_name = parts[1]
+                    state = parts[-1].upper()
+                    states[s_id] = state
+                    states[s_name] = state
+        except Exception:
+            pass
+        return states
+
+    @classmethod
+    def get_active_sink_inputs(cls) -> List[dict]:
+        """Parses active client application streams playing audio into PipeWire sinks."""
+        inputs = []
+        try:
+            res = subprocess.run(["pactl", "list", "sink-inputs"], capture_output=True, text=True, timeout=0.8)
+            blocks = res.stdout.split("Sink Input #")
+            for b in blocks:
+                if not b.strip():
+                    continue
+                lines = b.splitlines()
+                input_id = lines[0].strip()
+
+                is_polifonia_loopback = ("polifonia" in b) and ("polifonia_play" in b or "polifonia_branch" in b or "polifonia_cap" in b)
+                if is_polifonia_loopback:
+                    continue
+
+                sink_match = re.search(r"Sink:\s+(\d+)", b)
+                sink_id = int(sink_match.group(1)) if sink_match else None
+
+                corked_match = re.search(r"Corked:\s+(\w+)", b)
+                is_corked = (corked_match.group(1).lower() == "yes") if corked_match else False
+
+                mute_match = re.search(r"Mute:\s+(\w+)", b)
+                is_muted = (mute_match.group(1).lower() == "yes") if mute_match else False
+
+                app_name_match = re.search(r'application\.name\s+=\s+\"([^\"]+)\"', b)
+                icon_match = re.search(r'application\.icon_name\s+=\s+\"([^\"]+)\"', b)
+                binary_match = re.search(r'application\.process\.binary\s+=\s+\"([^\"]+)\"', b)
+                media_name_match = re.search(r'media\.name\s+=\s+\"([^\"]+)\"', b)
+                node_name_match = re.search(r'node\.name\s+=\s+\"([^\"]+)\"', b)
+
+                app_name = (
+                    app_name_match.group(1) if app_name_match else (
+                        binary_match.group(1) if binary_match else (
+                            node_name_match.group(1) if node_name_match else "Audio Stream"
+                        )
+                    )
+                )
+                icon_name = icon_match.group(1) if icon_match else "audio-x-generic"
+                media_name = media_name_match.group(1) if media_name_match else "Playback"
+
+                vol_match = re.search(r"/ (\d+)% /", b)
+                vol_pct = int(vol_match.group(1)) if vol_match else 100
+
+                inputs.append({
+                    "id": input_id,
+                    "sink_id": sink_id,
+                    "app_name": app_name,
+                    "icon_name": icon_name,
+                    "media_name": media_name,
+                    "volume_pct": vol_pct,
+                    "is_active": (not is_corked) and (not is_muted),
+                    "corked": is_corked,
+                    "muted": is_muted
+                })
+        except Exception:
+            pass
+        return inputs
 
 
 # Alias

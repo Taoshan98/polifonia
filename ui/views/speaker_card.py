@@ -10,17 +10,19 @@ from core.models import SpeakerConfig, SpeakerRole
 class SpeakerCard(Gtk.Box):
     """Vertical Channel Strip module representing a physical speaker or monitor."""
 
-    def __init__(self, channel: SpeakerConfig, on_change_cb, on_test_cb):
+    def __init__(self, channel: SpeakerConfig, on_change_cb, on_test_cb, audio_service=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.channel = channel
         self.on_change = on_change_cb
         self.on_test = on_test_cb
+        self.audio_service = audio_service
         self._updating_ui = False
         self._vol_debounce_id = 0
         self._delay_debounce_id = 0
+        self._enable_debounce_id = 0
 
         self.add_css_class("channel-card")
-        self.set_size_request(190, 520)
+        self.set_size_request(190, 470)
 
         self._build_ui()
         self._sync_state()
@@ -93,41 +95,7 @@ class SpeakerCard(Gtk.Box):
         # Separator
         self.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # 2. Role Selector Group (Pill Buttons: L | R | C | SUB | ALL | SURR)
-        role_label = Gtk.Label(label="CHANNEL ROLE")
-        role_label.add_css_class("strip-section-label")
-        self.append(role_label)
-
-        role_grid = Gtk.Grid()
-        role_grid.set_column_spacing(4)
-        role_grid.set_row_spacing(4)
-        role_grid.set_halign(Gtk.Align.CENTER)
-        self.role_buttons = {}
-
-        roles_def = [
-            ("L", SpeakerRole.LEFT, 0, 0, "Left Channel (FL)"),
-            ("R", SpeakerRole.RIGHT, 1, 0, "Right Channel (FR)"),
-            ("C", SpeakerRole.CENTER, 2, 0, "Center Channel (Mono)"),
-            ("SUB", SpeakerRole.SUBWOOFER, 3, 0, "Subwoofer (Low Frequencies)"),
-            ("ALL", SpeakerRole.STEREO, 0, 1, "Full Stereo (FL+FR)"),
-            ("SL", SpeakerRole.SURROUND_LEFT, 1, 1, "Surround Left"),
-            ("SR", SpeakerRole.SURROUND_RIGHT, 2, 1, "Surround Right")
-        ]
-
-        for code, role_val, col, row, tip in roles_def:
-            btn = Gtk.Button(label=code)
-            btn.set_tooltip_text(tip)
-            btn.add_css_class("role-pill")
-            btn.connect("clicked", lambda b, r=role_val: self._on_role_clicked(r))
-            role_grid.attach(btn, col, row, 1, 1)
-            self.role_buttons[role_val] = btn
-
-        self.append(role_grid)
-
-        # Separator
-        self.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-
-        # 3. Vertical Volume Fader Section
+        # 2. Vertical Volume Fader Section
         fader_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         fader_lbl = Gtk.Label(label="LEVEL")
         fader_lbl.add_css_class("strip-section-label")
@@ -149,8 +117,11 @@ class SpeakerCard(Gtk.Box):
         self.vol_scale.connect("value-changed", self._on_vol_changed)
         self.append(self.vol_scale)
 
-        # 4. Delay Alignment Control
-        delay_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        # Separator
+        self.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        # 3. Precision Delay Alignment Control (-150ms to +300ms)
+        delay_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         delay_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         delay_lbl = Gtk.Label(label="DELAY / PHASE")
         delay_lbl.add_css_class("strip-section-label")
@@ -158,21 +129,48 @@ class SpeakerCard(Gtk.Box):
         delay_lbl.set_halign(Gtk.Align.START)
         delay_hdr.append(delay_lbl)
 
-        hw_lat = getattr(self.channel, "hardware_latency_ms", 0.0)
-        init_badge = f"{self.channel.delay_ms:.0f}ms (HW:{hw_lat:.0f}ms)" if hw_lat > 0 else f"{self.channel.delay_ms:.1f}ms"
-        self.delay_badge = Gtk.Label(label=init_badge)
+        self.delay_badge = Gtk.Label()
         self.delay_badge.add_css_class("delay-badge")
         delay_hdr.append(self.delay_badge)
         delay_box.append(delay_hdr)
 
-        self.delay_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.0, 300.0, 1.0)
+        # Controls Row: [-1] [Slider] [+1] [0]
+        ctrl_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        ctrl_row.set_halign(Gtk.Align.FILL)
+
+        self.btn_delay_minus = Gtk.Button(label="-1")
+        self.btn_delay_minus.set_tooltip_text("Riduci delay (-1ms)")
+        self.btn_delay_minus.add_css_class("delay-btn")
+        self.btn_delay_minus.connect("clicked", lambda b: self._step_delay(-1.0))
+        ctrl_row.append(self.btn_delay_minus)
+
+        self.delay_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -150.0, 300.0, 1.0)
+        self.delay_scale.set_hexpand(True)
         self.delay_scale.set_value(self.channel.delay_ms)
         self.delay_scale.add_css_class("horizontal-delay-slider")
         self.delay_scale.connect("value-changed", self._on_delay_changed)
-        delay_box.append(self.delay_scale)
+        ctrl_row.append(self.delay_scale)
+
+        self.btn_delay_plus = Gtk.Button(label="+1")
+        self.btn_delay_plus.set_tooltip_text("Aumenta delay (+1ms)")
+        self.btn_delay_plus.add_css_class("delay-btn")
+        self.btn_delay_plus.connect("clicked", lambda b: self._step_delay(+1.0))
+        ctrl_row.append(self.btn_delay_plus)
+
+        self.btn_delay_zero = Gtk.Button(label="0")
+        self.btn_delay_zero.set_tooltip_text("Azzera delay (0ms)")
+        self.btn_delay_zero.add_css_class("delay-reset-btn")
+        self.btn_delay_zero.connect("clicked", lambda b: self._reset_delay())
+        ctrl_row.append(self.btn_delay_zero)
+
+        delay_box.append(ctrl_row)
+        self._update_delay_badge()
         self.append(delay_box)
 
-        # 5. Acoustic Audit (Test Tone) Button
+        # Separator
+        self.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        # 4. Acoustic Audit (Test Tone) Button
         self.test_btn = Gtk.Button(label=" Test Output")
         self.test_btn.set_icon_name("audio-volume-high-symbolic")
         self.test_btn.add_css_class("strip-test-btn")
@@ -220,32 +218,16 @@ class SpeakerCard(Gtk.Box):
             if "/" in cleaned and ("HDMI" in cleaned or "DisplayPort" in cleaned):
                 parts = [p.strip() for p in cleaned.split("/")]
                 cleaned = parts[-1]
-            if "(" in cleaned and len(cleaned) > 20:
+            if "(" in cleaned and len(cleaned) > 30:
                 cleaned = cleaned.split("(")[0].strip()
-        return cleaned[:22].strip()
+        return cleaned.strip()
 
     def _sync_state(self):
         self._updating_ui = True
         is_active = self.channel.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)
         self.enable_switch.set_active(is_active)
-        self._update_role_pills(self.channel.role)
+        self._update_delay_badge()
         self._updating_ui = False
-
-    def _update_role_pills(self, active_role: SpeakerRole):
-        for role_val, btn in self.role_buttons.items():
-            btn.remove_css_class("role-pill-active")
-            btn.remove_css_class("role-pill-sub")
-            btn.remove_css_class("role-pill-left")
-            btn.remove_css_class("role-pill-right")
-
-            if role_val == active_role:
-                btn.add_css_class("role-pill-active")
-                if role_val == SpeakerRole.SUBWOOFER:
-                    btn.add_css_class("role-pill-sub")
-                elif role_val == SpeakerRole.LEFT:
-                    btn.add_css_class("role-pill-left")
-                elif role_val == SpeakerRole.RIGHT:
-                    btn.add_css_class("role-pill-right")
 
     def _on_enable_toggled(self, switch, param):
         if self._updating_ui:
@@ -253,23 +235,43 @@ class SpeakerCard(Gtk.Box):
         active = switch.get_active()
         if active:
             if self.channel.role in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
-                self.channel.role = SpeakerRole.LEFT
+                self.channel.role = SpeakerRole.STEREO
+            # Guarantee audible volume upon activation (Bluetooth uses cubic attenuation where <0.50 is inaudible)
+            is_bt = (getattr(self.channel, "bus_type", "") == "bluetooth") or ("bluez" in self.channel.sink_name.lower())
+            min_gain = 0.50 if is_bt else 0.15
+            if self.channel.volume_gain < min_gain:
+                target_gain = 0.85 if is_bt else 1.0
+                self.channel.volume_gain = target_gain
+                self.vol_scale.set_value(target_gain)
+                self.vol_badge.set_text(f"{int(target_gain * 100)}%")
         else:
             self.channel.role = SpeakerRole.EXCLUDED
         self._sync_state()
-        self.on_change()
+        if self._enable_debounce_id:
+            GLib.source_remove(self._enable_debounce_id)
+        self._enable_debounce_id = GLib.timeout_add(150, self._emit_enable_change)
 
     def _on_role_clicked(self, new_role: SpeakerRole):
         self.channel.role = new_role
-        self.enable_switch.set_active(True)
+        self.enable_switch.set_active(new_role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED))
         self._sync_state()
+        if self._enable_debounce_id:
+            GLib.source_remove(self._enable_debounce_id)
+        self._enable_debounce_id = GLib.timeout_add(150, self._emit_enable_change)
+
+    def _emit_enable_change(self):
+        self._enable_debounce_id = 0
         self.on_change()
+        return False
 
     def _on_vol_changed(self, scale):
         val = scale.get_value()
         self.channel.volume_gain = round(val, 2)
         self.vol_badge.set_text(f"{int(self.channel.volume_gain * 100)}%")
-        # Debounce: only notify config change after 300ms of inactivity
+        # Fast non-blocking real-time volume adjustment to PipeWire hardware
+        if self.audio_service:
+            self.audio_service.set_speaker_gain(self.channel.sink_name, self.channel.volume_gain, persist=False)
+        # Debounce: only notify config change and disk save after 300ms of inactivity
         if self._vol_debounce_id:
             GLib.source_remove(self._vol_debounce_id)
         self._vol_debounce_id = GLib.timeout_add(300, self._emit_vol_change)
@@ -279,19 +281,32 @@ class SpeakerCard(Gtk.Box):
         self.on_change()
         return False  # Remove timeout
 
+    def _update_delay_badge(self):
+        d = self.channel.delay_ms
+        sign = "+" if d > 0 else ""
+        val_str = f"{sign}{d:.1f}ms" if d != 0.0 else "0.0ms"
+        hw_lat = getattr(self.channel, "hardware_latency_ms", 0.0)
+        if hw_lat > 0:
+            self.delay_badge.set_text(f"{val_str} (HW:{hw_lat:.0f}ms)")
+        else:
+            dist_m = d * 0.343
+            self.delay_badge.set_text(f"{val_str} ({dist_m:+.1f}m)" if d != 0.0 else val_str)
+
+    def _step_delay(self, delta: float):
+        new_val = max(-150.0, min(300.0, round(self.channel.delay_ms + delta, 1)))
+        self.delay_scale.set_value(new_val)
+
+    def _reset_delay(self):
+        self.delay_scale.set_value(0.0)
+
     def _on_delay_changed(self, scale):
         val = scale.get_value()
         self.channel.delay_ms = round(val, 1)
-        hw_lat = getattr(self.channel, "hardware_latency_ms", 0.0)
-        if hw_lat > 0:
-            self.delay_badge.set_text(f"{self.channel.delay_ms:.0f}ms (HW:{hw_lat:.0f}ms)")
-        else:
-            dist_m = self.channel.delay_ms * 0.343
-            self.delay_badge.set_text(f"{self.channel.delay_ms:.1f}ms ({dist_m:.1f}m)")
-        # Debounce: only notify config change after 300ms of inactivity
+        self._update_delay_badge()
+        # Debounce: apply delay change after 120ms of inactivity for snappy responsive feel
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(300, self._emit_delay_change)
+        self._delay_debounce_id = GLib.timeout_add(120, self._emit_delay_change)
 
     def _emit_delay_change(self):
         self._delay_debounce_id = 0
@@ -358,7 +373,7 @@ class SpeakerCard(Gtk.Box):
 
     def _get_display_title(self) -> str:
         if self.channel.custom_name:
-            return self.channel.custom_name[:22]
+            return self.channel.custom_name
         return self._short_name(self.channel.display_name or self.channel.sink_name)
 
     def _get_title_tooltip(self) -> str:

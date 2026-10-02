@@ -170,46 +170,51 @@ button.strip-edit-btn:checked,
     text-transform: uppercase;
 }
 
-/* Role Selector Pills */
-.role-pill {
-    background: #1a1e2a;
-    border: 1px solid #283042;
-    color: #8fa0b5;
+/* Precision Delay Step & Reset Buttons */
+button.delay-btn,
+.delay-btn {
+    min-width: 26px;
+    min-height: 24px;
+    padding: 2px 4px;
     font-size: 11px;
-    font-weight: 700;
-    border-radius: 6px;
-    min-width: 36px;
-    min-height: 28px;
-    padding: 2px 6px;
+    font-weight: 800;
+    font-family: monospace;
+    border-radius: 5px;
+    background: #181d28;
+    color: #94a3b8;
+    border: 1px solid #283144;
+    transition: all 120ms ease;
 }
 
-.role-pill:hover {
+button.delay-btn:hover,
+.delay-btn:hover {
     background: #252b3b;
-    color: #ffffff;
+    color: #00e5ff;
+    border-color: #00e5ff;
+    box-shadow: 0 0 6px rgba(0, 229, 255, 0.3);
 }
 
-.role-pill-active {
-    background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
-    border: 1px solid #00e5ff;
-    color: #ffffff;
-    box-shadow: 0 0 10px rgba(0, 229, 255, 0.35);
+button.delay-reset-btn,
+.delay-reset-btn {
+    min-width: 22px;
+    min-height: 24px;
+    padding: 2px 4px;
+    font-size: 11px;
+    font-weight: 800;
+    font-family: monospace;
+    border-radius: 5px;
+    background: #181d28;
+    color: #64748b;
+    border: 1px solid #283144;
+    transition: all 120ms ease;
 }
 
-.role-pill-sub {
-    background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
-    border-color: #c084fc;
-    color: #ffffff;
-    box-shadow: 0 0 10px rgba(168, 85, 247, 0.35);
-}
-
-.role-pill-left {
-    background: linear-gradient(135deg, #06b6d4 0%, #0284c7 100%);
-    color: #ffffff;
-}
-
-.role-pill-right {
-    background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
-    color: #ffffff;
+button.delay-reset-btn:hover,
+.delay-reset-btn:hover {
+    background: #252b3b;
+    color: #f59e0b;
+    border-color: #f59e0b;
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
 }
 
 /* Vertical Volume Fader */

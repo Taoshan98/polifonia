@@ -181,7 +181,7 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
             bt_sink = sinks[0]
             self.assertEqual(bt_sink.id, 139)
             self.assertEqual(bt_sink.name, "bluez_output.4C_87_5D_9F_7E_60.1")
-            self.assertEqual(bt_sink.description, "Bluetooth Audio (Black Diamond)")
+            self.assertEqual(bt_sink.description, "Black Diamond")
             self.assertEqual(bt_sink.bus_type, "bluetooth")
             self.assertEqual(bt_sink.latency_ms, 189.0)
 
@@ -192,6 +192,52 @@ PipeWire 'pipewire-0' [0.3.65, user@host, cookie:12345]
             DeviceScanner.get_sinks()
             DeviceScanner.get_available_sinks()
             self.assertEqual(mock_scan.call_count, 2)
+
+    def test_get_sink_states_parsing(self):
+        """Verify parsing short pactl sinks output into state dictionary."""
+        mock_output = """58\talsa_output.pci-gpu.pro-output-3\tPipeWire\ts32le 2ch 48000Hz\tRUNNING
+59\talsa_output.pci-gpu.pro-output-7\tPipeWire\ts32le 2ch 48000Hz\tSUSPENDED
+10279\tpolifonia_master\tPipeWire\tfloat32le 2ch 48000Hz\tRUNNING
+"""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout=mock_output, returncode=0)
+            states = DeviceScanner.get_sink_states()
+            self.assertEqual(states.get("58"), "RUNNING")
+            self.assertEqual(states.get("alsa_output.pci-gpu.pro-output-3"), "RUNNING")
+            self.assertEqual(states.get("59"), "SUSPENDED")
+            self.assertEqual(states.get("polifonia_master"), "RUNNING")
+
+    def test_get_active_sink_inputs_parsing(self):
+        """Verify parsing pactl sink-inputs output into client application streams, ignoring polifonia loops."""
+        mock_output = """Sink Input #501
+\tSink: 10279
+\tCorked: no
+\tMute: no
+\tVolume: front-left: 65536 / 100% / 0,00 dB
+\tProperties:
+\t\tapplication.name = "Google Chrome"
+\t\tapplication.icon_name = "google-chrome"
+\t\tmedia.name = "Playback"
+
+Sink Input #601
+\tSink: 58
+\tCorked: no
+\tMute: no
+\tProperties:
+\t\tnode.name = "polifonia_play_58"
+\t\tdevice.description = "polifonia_branch_58"
+"""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout=mock_output, returncode=0)
+            inputs = DeviceScanner.get_active_sink_inputs()
+            self.assertEqual(len(inputs), 1)
+            inp = inputs[0]
+            self.assertEqual(inp["id"], "501")
+            self.assertEqual(inp["sink_id"], 10279)
+            self.assertEqual(inp["app_name"], "Google Chrome")
+            self.assertEqual(inp["icon_name"], "google-chrome")
+            self.assertTrue(inp["is_active"])
+            self.assertFalse(inp["corked"])
 
 
 if __name__ == "__main__":

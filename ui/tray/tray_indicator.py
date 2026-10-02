@@ -133,29 +133,7 @@ class TrayIndicatorApp:
 
                 spk_sub.append(Gtk.SeparatorMenuItem())
 
-                # 2. Role Selection Submenu with Radio buttons
-                role_menu_item = Gtk.MenuItem(label=f"Role: {role}")
-                role_sub = Gtk.Menu()
-                roles = [
-                    ("LEFT", "Left Channel (FL)"),
-                    ("RIGHT", "Right Channel (FR)"),
-                    ("CENTER", "Center (Mono)"),
-                    ("SUBWOOFER", "Subwoofer"),
-                    ("STEREO", "Full Stereo"),
-                    ("SURROUND_LEFT", "Surround")
-                ]
-                r_group = None
-                for r_code, r_desc in roles:
-                    is_cur_role = (role == r_code)
-                    r_item = Gtk.RadioMenuItem.new_with_label(r_group, r_desc)
-                    r_group = r_item.get_group()
-                    r_item.set_active(is_cur_role)
-                    r_item.connect("toggled", lambda w, sn=s_name, r=r_code: self._on_role_toggled(w, sn, r))
-                    role_sub.append(r_item)
-                role_menu_item.set_submenu(role_sub)
-                spk_sub.append(role_menu_item)
-
-                # 3. Channel Volume Submenu with Radio buttons
+                # 2. Channel Volume Submenu with Radio buttons
                 gain_menu_item = Gtk.MenuItem(label=f"Volume: {int(gain * 100)}%")
                 gain_sub = Gtk.Menu()
                 g_group = None
@@ -236,20 +214,25 @@ class TrayIndicatorApp:
             pass
 
     def _listen_stdin(self):
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                msg = json.loads(line)
-                msg_type = msg.get("type")
-                if msg_type == "sync_state":
-                    GLib.idle_add(self._apply_state_sync, msg)
-                elif msg_type == "quit":
-                    GLib.idle_add(Gtk.main_quit)
-                    break
-            except Exception as e:
-                sys.stderr.write(f"Error parsing IPC message: {e}\n")
+        try:
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                    msg_type = msg.get("type")
+                    if msg_type == "sync_state":
+                        GLib.idle_add(self._apply_state_sync, msg)
+                    elif msg_type == "quit":
+                        GLib.idle_add(Gtk.main_quit)
+                        return
+                except Exception as e:
+                    sys.stderr.write(f"Error parsing IPC message: {e}\n")
+        finally:
+            # Parent process closed stdin (exit or killed) -> terminate immediately
+            GLib.idle_add(Gtk.main_quit)
+            os._exit(0)
 
     def _apply_state_sync(self, data: dict):
         self.is_active = data.get("is_active", False)
@@ -268,5 +251,8 @@ class TrayIndicatorApp:
 
 
 if __name__ == "__main__":
+    import signal
+    signal.signal(signal.SIGTERM, lambda s, f: os._exit(0))
+    signal.signal(signal.SIGINT, lambda s, f: os._exit(0))
     app = TrayIndicatorApp()
     Gtk.main()
