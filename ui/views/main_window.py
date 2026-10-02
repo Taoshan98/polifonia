@@ -383,17 +383,24 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_close_request(self, window):
         """Hides the window instead of closing so background audio keeps playing."""
+        if hasattr(self, "routing_graph"):
+            self.routing_graph.stop_polling()
         self.hide()
         self._sync_tray_state(window_visible=False)
         return True  # Stop default window destruction
 
     def _toggle_window_visibility(self):
         if self.is_visible():
+            if hasattr(self, "routing_graph"):
+                self.routing_graph.stop_polling()
             self.hide()
             self._sync_tray_state(window_visible=False)
         else:
             self.present()
             self._sync_tray_state(window_visible=True)
+            if hasattr(self, "routing_graph") and self.view_stack.get_visible_child_name() == "routing":
+                self.routing_graph.refresh_topology()
+                self.routing_graph.start_polling()
 
     def _toggle_unison_from_tray(self):
         self._on_toggle_unison_clicked(None)

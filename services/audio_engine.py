@@ -9,11 +9,14 @@ import math
 import struct
 import wave
 import re
+import logging
 from typing import List, Optional, Union, Dict
 from core.models import SystemConfig, AudioSink, SpeakerRole, SpeakerConfig
 from backend.pipewire_scanner import PipeWireScanner
 from backend.pipewire_config import PipeWireConfigGenerator
 from storage.settings_store import StorageService
+
+logger = logging.getLogger("polifonia.audio_engine")
 
 
 class AudioEngineService:
@@ -158,6 +161,7 @@ class AudioEngineService:
         """Generates a test tone directly on a specific sink name or ID."""
         actual_target = target if target != 0 else (sink_id or 0)
         def _play():
+            wav_path = None
             try:
                 sample_rate = 44100
                 num_samples = int(sample_rate * duration)
@@ -178,10 +182,14 @@ class AudioEngineService:
                             wav_file.writeframesraw(data)
                 
                 subprocess.run(["pw-play", f"--target={actual_target}", wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if os.path.exists(wav_path):
-                    os.remove(wav_path)
             except Exception as e:
-                print(f"Error playing test tone on {actual_target}: {e}")
+                logger.error(f"Error playing test tone on {actual_target}: {e}")
+            finally:
+                if wav_path and os.path.exists(wav_path):
+                    try:
+                        os.remove(wav_path)
+                    except Exception:
+                        pass
         threading.Thread(target=_play, daemon=True).start()
 
     def test_tone(self, target: Union[int, str] = 0, freq: int = 440, duration: float = 0.6, sink_id: Optional[Union[int, str]] = None):
@@ -269,7 +277,7 @@ class AudioEngineService:
             subprocess.run(["pactl", "set-default-sink", "polifonia_master"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except Exception as e:
-            print(f"Error creating master virtual sink: {e}")
+            logger.error(f"Error creating master virtual sink: {e}")
             return False
 
     @staticmethod
@@ -354,7 +362,7 @@ class AudioEngineService:
             self._sync_processes[sink_name] = proc
             self._running_delays[sink_name] = total_delay_ms
         except Exception as e:
-            print(f"Error starting loopback for {target}: {e}")
+            logger.error(f"Error starting loopback for {target}: {e}")
 
     def sync_active_branches(self):
         """Seamlessly starts or stops individual speaker loopbacks with clean crystal audio without stopping main playback."""
