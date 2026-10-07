@@ -1,6 +1,7 @@
 """Audio Engine Service to coordinate discovery, routing, volume and test signals."""
 
 import os
+import sys
 import subprocess
 import threading
 import time
@@ -522,12 +523,6 @@ class AudioEngineService:
         if not proc:
             return
         try:
-            if proc.pid:
-                try:
-                    subprocess.run(["wpctl", "set-mute", "-p", str(proc.pid), "1"],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.08)
-                except Exception:
-                    pass
             proc.terminate()
             try:
                 proc.wait(timeout=0.15)
@@ -548,8 +543,8 @@ class AudioEngineService:
         branch_name = f"polifonia_branch_{seq_tag}"
         target = spk.sink_name or str(spk.sink_id)
 
-        cap_props = f"target.object=polifonia_master stream.capture.sink=true node.name=polifonia_cap_{seq_tag} node.dont-reconnect=true"
-        play_props = f"target.object={target} node.name=polifonia_play_{seq_tag} node.passive=false node.dont-reconnect=true"
+        cap_props = f"target.object=polifonia_master stream.capture.sink=true node.name=polifonia_cap_{seq_tag} node.dont-reconnect=true state.restore-props=false audio.rate=48000"
+        play_props = f"target.object={target} node.name=polifonia_play_{seq_tag} node.passive=false node.dont-reconnect=true state.restore-props=false"
 
         role_to_use = getattr(spk, "effective_role", spk.role)
         if role_to_use in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
@@ -585,12 +580,26 @@ class AudioEngineService:
             self._running_user_delays[sink_name] = spk.delay_ms
             self._running_roles[sink_name] = role_to_use
             self._running_muted[sink_name] = start_muted
-            if proc and proc.pid and start_muted:
+            if proc and proc.pid:
+                target_mute = "1" if start_muted else "0"
                 try:
-                    subprocess.run(["wpctl", "set-mute", "-p", str(proc.pid), "1"],
+                    subprocess.run(["wpctl", "set-mute", "-p", str(proc.pid), target_mute],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.1)
                 except Exception:
                     pass
+                is_test = "unittest" in sys.modules
+                if not start_muted and not is_test:
+                    def _post_launch_unmute_nudge(p_pid, s_name):
+                        for delay in (0.05, 0.18):
+                            time.sleep(delay)
+                            try:
+                                subprocess.run(["wpctl", "set-mute", "-p", str(p_pid), "0"],
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.1)
+                                subprocess.run(["pactl", "set-sink-mute", s_name, "0"],
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.1)
+                            except Exception:
+                                pass
+                    threading.Thread(target=_post_launch_unmute_nudge, args=(proc.pid, sink_name), daemon=True).start()
         except Exception as e:
             logger.error(f"Error starting loopback for {target}: {e}")
 
@@ -672,8 +681,10 @@ class AudioEngineService:
                 user_delay_changed = (last_user_delay is None) or (abs(last_user_delay - spk.delay_ms) > 0.05)
                 user_min_delay_changed = abs(self._running_user_min_delay - user_min_delay) > 0.05
 
-                # Terminate and restart if role changed, speaker's user delay changed, or negative delay compensation shifted
-                needs_restart = role_changed or user_delay_changed or user_min_delay_changed
+                # Terminate and restart ONLY if this specific speaker's role or user delay changed.
+                # Never restart healthy running wired streams when another device's delay changes,
+                # avoiding DisplayPort audio clock PLL jitter and follower resync noise on dual GPU outputs.
+                needs_restart = role_changed or user_delay_changed
 
                 # Never interrupt or kill healthy, running streams unless role or user delay actually changed
                 if current_proc and not proc_dead and not needs_restart:
@@ -711,19 +722,15 @@ class AudioEngineService:
             wired_launches = {k: v for k, v in to_launch.items() if not v[2]}
 
             for sink_name, (spk, total_delay_ms, is_bt, start_muted) in bt_launches.items():
-                vol_pct = f"{int(spk.volume_gain * 100)}%"
+                try:
+                    vol_pct = f"{int(spk.volume_gain * 100)}%"
+                    subprocess.run(["pactl", "set-sink-mute", sink_name, "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+                    subprocess.run(["pactl", "set-sink-volume", sink_name, vol_pct], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+                except Exception:
+                    pass
+                if not is_test:
+                    time.sleep(0.04)
                 self._spawn_loopback(spk, sink_name, total_delay_ms, is_bt=True, has_bt_active=has_bt_active, start_muted=start_muted)
-                if not start_muted and not is_test:
-                    def _bt_post_launch_nudge(s_name):
-                        time.sleep(0.3)
-                        with self._sync_lock:
-                            if self._running_muted.get(s_name, False):
-                                return
-                        try:
-                            subprocess.run(["pactl", "set-sink-mute", s_name, "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
-                        except Exception:
-                            pass
-                    threading.Thread(target=_bt_post_launch_nudge, args=(sink_name,), daemon=True).start()
 
             # Phase 4: Launch wired endpoints
             for sink_name, (spk, total_delay_ms, is_bt, start_muted) in wired_launches.items():
@@ -733,6 +740,8 @@ class AudioEngineService:
                     subprocess.run(["pactl", "set-sink-volume", sink_name, vol_pct], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
                 except Exception:
                     pass
+                if not is_test:
+                    time.sleep(0.04)
                 self._spawn_loopback(spk, sink_name, total_delay_ms, is_bt=False, has_bt_active=has_bt_active, start_muted=start_muted)
 
             self._running_user_min_delay = user_min_delay

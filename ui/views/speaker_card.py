@@ -123,22 +123,22 @@ class SpeakerCard(Gtk.Box):
         # 2C. Sezione per la gestione del delay (senza la barra del delay!)
         delay_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         delay_box.set_valign(Gtk.Align.CENTER)
-        delay_box.set_size_request(245, -1)
+        delay_box.set_size_request(270, -1)
 
         delay_lbl = Gtk.Label(label="Delay:")
         delay_lbl.add_css_class("dim-label")
         delay_box.append(delay_lbl)
 
-        self.btn_delay_minus_10 = Gtk.Button(label="-1")
-        self.btn_delay_minus_10.set_tooltip_text("Decrease delay (-1 ms)")
+        self.btn_delay_minus_10 = Gtk.Button(label="-10")
+        self.btn_delay_minus_10.set_tooltip_text("Decrease delay (-10 ms)")
         self.btn_delay_minus_10.add_css_class("delay-btn")
-        self.btn_delay_minus_10.connect("clicked", lambda b: self._step_delay(-1.0))
+        self.btn_delay_minus_10.connect("clicked", lambda b: self._step_delay(-10.0))
         delay_box.append(self.btn_delay_minus_10)
 
-        self.btn_delay_minus = Gtk.Button(label="-0.5")
-        self.btn_delay_minus.set_tooltip_text("Decrease delay (-0.5 ms)")
+        self.btn_delay_minus = Gtk.Button(label="-2")
+        self.btn_delay_minus.set_tooltip_text("Fine decrease delay (-2 ms)")
         self.btn_delay_minus.add_css_class("delay-btn")
-        self.btn_delay_minus.connect("clicked", lambda b: self._step_delay(-0.5))
+        self.btn_delay_minus.connect("clicked", lambda b: self._step_delay(-2.0))
         delay_box.append(self.btn_delay_minus)
 
         self.delay_badge = Gtk.Label()
@@ -146,16 +146,16 @@ class SpeakerCard(Gtk.Box):
         self.delay_badge.set_size_request(65, -1)
         delay_box.append(self.delay_badge)
 
-        self.btn_delay_plus = Gtk.Button(label="+0.5")
-        self.btn_delay_plus.set_tooltip_text("Increase delay (+0.5 ms)")
+        self.btn_delay_plus = Gtk.Button(label="+2")
+        self.btn_delay_plus.set_tooltip_text("Fine increase delay (+2 ms)")
         self.btn_delay_plus.add_css_class("delay-btn")
-        self.btn_delay_plus.connect("clicked", lambda b: self._step_delay(+0.5))
+        self.btn_delay_plus.connect("clicked", lambda b: self._step_delay(+2.0))
         delay_box.append(self.btn_delay_plus)
 
-        self.btn_delay_plus_10 = Gtk.Button(label="+1")
-        self.btn_delay_plus_10.set_tooltip_text("Increase delay (+1 ms)")
+        self.btn_delay_plus_10 = Gtk.Button(label="+10")
+        self.btn_delay_plus_10.set_tooltip_text("Increase delay (+10 ms)")
         self.btn_delay_plus_10.add_css_class("delay-btn")
-        self.btn_delay_plus_10.connect("clicked", lambda b: self._step_delay(+1.0))
+        self.btn_delay_plus_10.connect("clicked", lambda b: self._step_delay(+10.0))
         delay_box.append(self.btn_delay_plus_10)
 
         self.btn_delay_zero = Gtk.Button(label="0")
@@ -382,7 +382,7 @@ class SpeakerCard(Gtk.Box):
         self._update_delay_badge()
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(150, self._emit_delay_change)
+        self._delay_debounce_id = GLib.timeout_add(400, self._emit_delay_change)
 
     def _reset_delay(self):
         self.channel.delay_ms = 0.0
@@ -392,7 +392,7 @@ class SpeakerCard(Gtk.Box):
         self._update_delay_badge()
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(150, self._emit_delay_change)
+        self._delay_debounce_id = GLib.timeout_add(400, self._emit_delay_change)
 
     def _on_delay_changed(self, scale):
         if self._updating_ui:
@@ -402,7 +402,7 @@ class SpeakerCard(Gtk.Box):
         self._update_delay_badge()
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(150, self._emit_delay_change)
+        self._delay_debounce_id = GLib.timeout_add(400, self._emit_delay_change)
 
     def _emit_delay_change(self):
         self._delay_debounce_id = 0

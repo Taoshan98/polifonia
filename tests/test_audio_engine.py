@@ -316,6 +316,50 @@ class TestAudioEngine(unittest.TestCase):
             delay_idx = sink2_cmd.index("--delay")
             self.assertEqual(sink2_cmd[delay_idx + 1], "0.0250")
 
+    def test_delay_change_does_not_restart_unaffected_speakers(self):
+        """Verify modifying delay on one speaker does not kill or restart other active speakers."""
+        self.service.config.channels = [
+            SpeakerConfig(
+                sink_id=1,
+                sink_name="alsa_output.pci.monitor_sinistra",
+                role=SpeakerRole.STEREO,
+                delay_ms=0.0,
+                bus_type="hdmi",
+                hardware_latency_ms=10.0
+            ),
+            SpeakerConfig(
+                sink_id=2,
+                sink_name="bluez_output.speaker_bt",
+                role=SpeakerRole.STEREO,
+                delay_ms=0.0,
+                bus_type="bluetooth",
+                hardware_latency_ms=150.0
+            )
+        ]
+        mock_proc1 = MagicMock(poll=MagicMock(return_value=None), pid=1001)
+        mock_proc2 = MagicMock(poll=MagicMock(return_value=None), pid=1002)
+        mock_proc3 = MagicMock(poll=MagicMock(return_value=None), pid=1003)
+        with patch.object(self.service, "_ensure_master_sink", return_value=True), \
+             patch("subprocess.Popen", side_effect=[mock_proc1, mock_proc2, mock_proc3]) as mock_popen, \
+             patch.object(self.service, "_async_kill") as mock_kill, \
+             patch("subprocess.run"):
+            self.service.start_unison_sink()
+            self.assertEqual(mock_popen.call_count, 2)
+            # Bluetooth is launched first (Phase 3), wired second (Phase 4)
+            self.assertIs(self.service._sync_processes["bluez_output.speaker_bt"], mock_proc1)
+            self.assertIs(self.service._sync_processes["alsa_output.pci.monitor_sinistra"], mock_proc2)
+
+            # Change delay on Bluetooth speaker only
+            self.service.config.channels[1].delay_ms = 10.0
+            self.service.sync_active_branches()
+
+            # Verify mock_proc2 (monitor_sinistra) was NEVER killed
+            mock_kill.assert_called_once_with(mock_proc1)
+            # Verify monitor_sinistra is still running the original mock_proc2 process
+            self.assertIs(self.service._sync_processes["alsa_output.pci.monitor_sinistra"], mock_proc2)
+            # Verify bluetooth was updated to the new mock_proc3
+            self.assertIs(self.service._sync_processes["bluez_output.speaker_bt"], mock_proc3)
+
     def test_alias_audio_service(self):
         """Verify AudioService is an alias to AudioEngineService."""
         self.assertIs(AudioService, AudioEngineService)
