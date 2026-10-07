@@ -129,16 +129,16 @@ class SpeakerCard(Gtk.Box):
         delay_lbl.add_css_class("dim-label")
         delay_box.append(delay_lbl)
 
-        self.btn_delay_minus_10 = Gtk.Button(label="-10")
-        self.btn_delay_minus_10.set_tooltip_text("Decrease delay (-10 ms)")
+        self.btn_delay_minus_10 = Gtk.Button(label="-1")
+        self.btn_delay_minus_10.set_tooltip_text("Decrease delay (-1 ms)")
         self.btn_delay_minus_10.add_css_class("delay-btn")
-        self.btn_delay_minus_10.connect("clicked", lambda b: self._step_delay(-10.0))
+        self.btn_delay_minus_10.connect("clicked", lambda b: self._step_delay(-1.0))
         delay_box.append(self.btn_delay_minus_10)
 
-        self.btn_delay_minus = Gtk.Button(label="-1")
-        self.btn_delay_minus.set_tooltip_text("Decrease delay (-1 ms)")
+        self.btn_delay_minus = Gtk.Button(label="-0.5")
+        self.btn_delay_minus.set_tooltip_text("Decrease delay (-0.5 ms)")
         self.btn_delay_minus.add_css_class("delay-btn")
-        self.btn_delay_minus.connect("clicked", lambda b: self._step_delay(-1.0))
+        self.btn_delay_minus.connect("clicked", lambda b: self._step_delay(-0.5))
         delay_box.append(self.btn_delay_minus)
 
         self.delay_badge = Gtk.Label()
@@ -146,16 +146,16 @@ class SpeakerCard(Gtk.Box):
         self.delay_badge.set_size_request(65, -1)
         delay_box.append(self.delay_badge)
 
-        self.btn_delay_plus = Gtk.Button(label="+1")
-        self.btn_delay_plus.set_tooltip_text("Increase delay (+1 ms)")
+        self.btn_delay_plus = Gtk.Button(label="+0.5")
+        self.btn_delay_plus.set_tooltip_text("Increase delay (+0.5 ms)")
         self.btn_delay_plus.add_css_class("delay-btn")
-        self.btn_delay_plus.connect("clicked", lambda b: self._step_delay(+1.0))
+        self.btn_delay_plus.connect("clicked", lambda b: self._step_delay(+0.5))
         delay_box.append(self.btn_delay_plus)
 
-        self.btn_delay_plus_10 = Gtk.Button(label="+10")
-        self.btn_delay_plus_10.set_tooltip_text("Increase delay (+10 ms)")
+        self.btn_delay_plus_10 = Gtk.Button(label="+1")
+        self.btn_delay_plus_10.set_tooltip_text("Increase delay (+1 ms)")
         self.btn_delay_plus_10.add_css_class("delay-btn")
-        self.btn_delay_plus_10.connect("clicked", lambda b: self._step_delay(+10.0))
+        self.btn_delay_plus_10.connect("clicked", lambda b: self._step_delay(+1.0))
         delay_box.append(self.btn_delay_plus_10)
 
         self.btn_delay_zero = Gtk.Button(label="0")
@@ -305,10 +305,8 @@ class SpeakerCard(Gtk.Box):
             self.channel.role = SpeakerRole.STEREO
             self.channel._acoustic_role = SpeakerRole.STEREO
             self.channel.mute = False
-            is_bt = (getattr(self.channel, "bus_type", "") == "bluetooth") or ("bluez" in self.channel.sink_name.lower())
-            min_gain = 0.50 if is_bt else 0.15
-            if self.channel.volume_gain < min_gain:
-                target_gain = 0.85 if is_bt else 1.0
+            if self.channel.volume_gain < 0.05:
+                target_gain = 1.0
                 self.channel.volume_gain = target_gain
                 self._updating_ui = True
                 self.vol_scale.set_value(target_gain)
@@ -384,7 +382,7 @@ class SpeakerCard(Gtk.Box):
         self._update_delay_badge()
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(60, self._emit_delay_change)
+        self._delay_debounce_id = GLib.timeout_add(150, self._emit_delay_change)
 
     def _reset_delay(self):
         self.channel.delay_ms = 0.0
@@ -394,7 +392,7 @@ class SpeakerCard(Gtk.Box):
         self._update_delay_badge()
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(60, self._emit_delay_change)
+        self._delay_debounce_id = GLib.timeout_add(150, self._emit_delay_change)
 
     def _on_delay_changed(self, scale):
         if self._updating_ui:
@@ -404,7 +402,7 @@ class SpeakerCard(Gtk.Box):
         self._update_delay_badge()
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(60, self._emit_delay_change)
+        self._delay_debounce_id = GLib.timeout_add(150, self._emit_delay_change)
 
     def _emit_delay_change(self):
         self._delay_debounce_id = 0

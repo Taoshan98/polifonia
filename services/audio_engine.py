@@ -30,6 +30,7 @@ class AudioEngineService:
         self._running_delays: Dict[str, float] = {}
         self._running_user_delays: Dict[str, float] = {}
         self._running_roles: Dict[str, SpeakerRole] = {}
+        self._running_user_min_delay: float = 0.0
         self._sync_lock = threading.RLock()
         self._master_sink_lock = threading.Lock()
         self._master_module_id: Optional[str] = None
@@ -182,7 +183,7 @@ class AudioEngineService:
             if not mute:
                 subprocess.run(["pactl", "set-sink-mute", sink_name, "0"],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
-                vol_pct = f"{max(15, int(gain_val * 100))}%"
+                vol_pct = f"{int(gain_val * 100)}%"
                 subprocess.run(["pactl", "set-sink-volume", sink_name, vol_pct],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
                 if proc and proc.poll() is None:
@@ -521,9 +522,15 @@ class AudioEngineService:
         if not proc:
             return
         try:
+            if proc.pid:
+                try:
+                    subprocess.run(["wpctl", "set-mute", "-p", str(proc.pid), "1"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.08)
+                except Exception:
+                    pass
             proc.terminate()
             try:
-                proc.wait(timeout=0.1)
+                proc.wait(timeout=0.15)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 try:
@@ -541,11 +548,8 @@ class AudioEngineService:
         branch_name = f"polifonia_branch_{seq_tag}"
         target = spk.sink_name or str(spk.sink_id)
 
-        cap_props = f"target.object=polifonia_master stream.capture.sink=true node.name=polifonia_cap_{seq_tag}"
+        cap_props = f"target.object=polifonia_master stream.capture.sink=true node.name=polifonia_cap_{seq_tag} node.dont-reconnect=true"
         play_props = f"target.object={target} node.name=polifonia_play_{seq_tag} node.passive=false node.dont-reconnect=true"
-        if is_bt:
-            cap_props += " node.async=true node.dont-reconnect=true"
-            play_props += " node.async=true"
 
         role_to_use = getattr(spk, "effective_role", spk.role)
         if role_to_use in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
@@ -605,14 +609,20 @@ class AudioEngineService:
             import sys
             is_test = "unittest" in sys.modules
 
-            # Latency reference is calculated across all configured profile channels (excluding internal speakers)
-            # so delay compensation remains completely stable without restarting running wired streams when BT connects/disconnects.
-            profile_speakers = [
-                s for s in self.config.channels
-                if not getattr(s, "is_internal", False)
-            ]
-            if not profile_speakers:
-                profile_speakers = self.config.channels
+            # Latency reference is calculated across all connected/live channels (excluding internal speakers)
+            # so delay compensation remains completely stable without restarting running wired streams when BT is toggled.
+            # Disconnected historical devices are excluded so they don't introduce ghost latency.
+            if is_test or not live_sink_names:
+                profile_speakers = [
+                    s for s in self.config.channels
+                    if not getattr(s, "is_internal", False)
+                ] or self.config.channels
+            else:
+                profile_speakers = [
+                    s for s in self.config.channels
+                    if s.sink_name in live_sink_names
+                    and not getattr(s, "is_internal", False)
+                ] or self.config.channels
 
             max_hw_latency = max((getattr(s, "hardware_latency_ms", 0.0) for s in profile_speakers), default=0.0)
             user_min_delay = min(0.0, min((s.delay_ms for s in profile_speakers), default=0.0))
@@ -658,10 +668,15 @@ class AudioEngineService:
                 current_proc = self._sync_processes.get(sink_name)
                 proc_dead = (current_proc is None) or (current_proc.poll() is not None)
                 role_changed = (self._running_roles.get(sink_name) != target_role)
-                user_delay_changed = abs(self._running_user_delays.get(sink_name, spk.delay_ms) - spk.delay_ms) > 0.1
+                last_user_delay = self._running_user_delays.get(sink_name)
+                user_delay_changed = (last_user_delay is None) or (abs(last_user_delay - spk.delay_ms) > 0.05)
+                user_min_delay_changed = abs(self._running_user_min_delay - user_min_delay) > 0.05
+
+                # Terminate and restart if role changed, speaker's user delay changed, or negative delay compensation shifted
+                needs_restart = role_changed or user_delay_changed or user_min_delay_changed
 
                 # Never interrupt or kill healthy, running streams unless role or user delay actually changed
-                if current_proc and not proc_dead and not role_changed and not user_delay_changed:
+                if current_proc and not proc_dead and not needs_restart:
                     # Instantly adjust mute state if needed (<15ms hardware sync)
                     should_be_muted = not is_enabled
                     curr_muted = self._running_muted.get(sink_name, False)
@@ -683,10 +698,11 @@ class AudioEngineService:
             if restart_or_stop_sinks:
                 for s_name in restart_or_stop_sinks:
                     proc = self._sync_processes.pop(s_name, None)
-                    self._running_delays.pop(s_name, None)
-                    self._running_user_delays.pop(s_name, None)
-                    self._running_roles.pop(s_name, None)
-                    self._running_muted.pop(s_name, None)
+                    if s_name in to_terminate:
+                        self._running_delays.pop(s_name, None)
+                        self._running_user_delays.pop(s_name, None)
+                        self._running_roles.pop(s_name, None)
+                        self._running_muted.pop(s_name, None)
                     if proc:
                         self._async_kill(proc)
 
@@ -695,32 +711,31 @@ class AudioEngineService:
             wired_launches = {k: v for k, v in to_launch.items() if not v[2]}
 
             for sink_name, (spk, total_delay_ms, is_bt, start_muted) in bt_launches.items():
-                target_gain = max(0.50, spk.volume_gain)
-                spk.volume_gain = target_gain
-                vol_pct = f"{int(target_gain * 100)}%"
+                vol_pct = f"{int(spk.volume_gain * 100)}%"
                 self._spawn_loopback(spk, sink_name, total_delay_ms, is_bt=True, has_bt_active=has_bt_active, start_muted=start_muted)
                 if not start_muted and not is_test:
-                    def _bt_post_launch_nudge(s_name, pct_str):
-                        time.sleep(0.4)
+                    def _bt_post_launch_nudge(s_name):
+                        time.sleep(0.3)
                         with self._sync_lock:
                             if self._running_muted.get(s_name, False):
                                 return
                         try:
-                            subprocess.run(["pactl", "set-sink-mute", s_name, "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.3)
-                            subprocess.run(["pactl", "set-sink-volume", s_name, pct_str], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.3)
+                            subprocess.run(["pactl", "set-sink-mute", s_name, "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
                         except Exception:
                             pass
-                    threading.Thread(target=_bt_post_launch_nudge, args=(sink_name, vol_pct), daemon=True).start()
+                    threading.Thread(target=_bt_post_launch_nudge, args=(sink_name,), daemon=True).start()
 
             # Phase 4: Launch wired endpoints
             for sink_name, (spk, total_delay_ms, is_bt, start_muted) in wired_launches.items():
                 try:
-                    vol_pct = f"{max(15, int(spk.volume_gain * 100))}%"
+                    vol_pct = f"{int(spk.volume_gain * 100)}%"
                     subprocess.run(["pactl", "set-sink-mute", sink_name, "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
                     subprocess.run(["pactl", "set-sink-volume", sink_name, vol_pct], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
                 except Exception:
                     pass
                 self._spawn_loopback(spk, sink_name, total_delay_ms, is_bt=False, has_bt_active=has_bt_active, start_muted=start_muted)
+
+            self._running_user_min_delay = user_min_delay
 
             # Keep polifonia_master awake and unmuted
             try:
@@ -826,6 +841,7 @@ class AudioEngineService:
             self._running_user_delays.clear()
             self._running_roles.clear()
             self._running_muted.clear()
+            self._running_user_min_delay = 0.0
 
         try:
             subprocess.run(["pkill", "-f", "pw-loopback.*polifonia"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.3)

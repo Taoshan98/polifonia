@@ -216,8 +216,10 @@ class TestAudioEngine(unittest.TestCase):
             self.assertFalse(any("node.passive=true" in arg for arg in bt_cmd))
             # Must NOT force -l 15
             self.assertNotIn("-l", bt_cmd)
-            # Must be asynchronous to isolate clock domains and prevent ALSA resync lockups
-            self.assertTrue(any("node.async=true" in arg for arg in bt_cmd))
+            # Must have node.dont-reconnect to prevent erratic graph reconnects
+            self.assertTrue(any("node.dont-reconnect=true" in arg for arg in bt_cmd))
+            # Must NOT be marked node.async=true which stalls PipeWire graph driving
+            self.assertFalse(any("node.async=true" in arg for arg in bt_cmd))
 
     def test_auto_latency_compensation_between_monitor_and_bluetooth(self):
         """Verify faster monitor sink is automatically delayed to match higher-latency Bluetooth sink."""
@@ -421,9 +423,9 @@ class TestAudioEngine(unittest.TestCase):
              patch("time.sleep"):
             self.service.start_unison_sink()
 
-            # 1. Verify Bluetooth volume was raised to audible level (>= 0.50)
+            # 1. Verify Bluetooth volume preserves user-configured level (does not force to 0.50/0.85)
             bt_spk = next(s for s in self.service.config.channels if "bluez" in s.sink_name)
-            self.assertGreaterEqual(bt_spk.volume_gain, 0.50)
+            self.assertEqual(bt_spk.volume_gain, 0.25)
 
             # 2. Verify no conflicting pw-play stream was opened on the Bluetooth transport
             pw_play_calls = [

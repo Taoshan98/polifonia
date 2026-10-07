@@ -96,9 +96,6 @@ class MainWindow(Adw.ApplicationWindow):
                 saved.display_name = live.description
                 saved.hardware_latency_ms = live.latency_ms
                 saved.bus_type = live.bus_type
-                is_bt = (live.bus_type == "bluetooth") or ("bluez" in live.name.lower())
-                if is_bt and saved.volume_gain < 0.50:
-                    saved.volume_gain = 0.85
                 if saved.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
                     saved.role = SpeakerRole.STEREO
                     saved._acoustic_role = SpeakerRole.STEREO
@@ -486,10 +483,8 @@ class MainWindow(Adw.ApplicationWindow):
                 if enabled:
                     ch.role = SpeakerRole.STEREO
                     ch._acoustic_role = SpeakerRole.STEREO
-                    is_bt = (getattr(ch, "bus_type", "") == "bluetooth") or ("bluez" in ch.sink_name.lower())
-                    min_gain = 0.50 if is_bt else 0.15
-                    if ch.volume_gain < min_gain:
-                        ch.volume_gain = 0.85 if is_bt else 1.0
+                    if ch.volume_gain < 0.05:
+                        ch.volume_gain = 1.0
                 else:
                     ch._acoustic_role = SpeakerRole.STEREO
                     ch.role = SpeakerRole.EXCLUDED
