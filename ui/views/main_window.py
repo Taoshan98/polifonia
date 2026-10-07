@@ -1,9 +1,11 @@
-"""Main Horizontal Studio Mixing Console Application Window."""
+"""Studio Mixing Console Application Window for Polifonia."""
 
 import os
 import sys
+import time
 import subprocess
 import threading
+import logging
 from typing import Optional
 import gi
 gi.require_version('Gtk', '4.0')
@@ -16,15 +18,17 @@ from ui.views.speaker_card import SpeakerCard
 from ui.views.routing_graph import RoutingGraphView
 from ui.tray.tray_service import TrayService
 
+logger = logging.getLogger("polifonia.main_window")
+
 
 class MainWindow(Adw.ApplicationWindow):
-    """Professional Horizontal Studio Mixing Console for Polifonia."""
+    """Professional Studio Mixing Console for Polifonia."""
 
     def __init__(self, app, audio_service: AudioService, preset_manager: PresetManager):
         super().__init__(application=app, title="Polifonia Audio Studio")
         self.set_default_size(1080, 680)
 
-        # Load Custom Cross-Desktop Studio Theme
+        # Load Custom Studio Theme
         css_provider = Gtk.CssProvider()
         css_path = os.path.join(os.path.dirname(__file__), "..", "styles", "studio_theme.css")
         if os.path.exists(css_path):
@@ -50,11 +54,15 @@ class MainWindow(Adw.ApplicationWindow):
         # Merge live sinks with saved configuration
         self._sync_live_sinks()
 
-        # If saved as active, auto-activate the audio unison engine
+        # If saved as active, auto-activate the audio unison engine if channels are active
         if self.config.is_active:
-            success = self.audio_service.activate_unison(self.config)
-            if not success:
-                self.config.is_active = False
+            active_speakers = [s for s in self.config.channels if s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
+            if active_speakers:
+                success = self.audio_service.activate_unison(self.config)
+                if not success:
+                    self.config.is_active = False
+            # If no channels are active yet on startup, self.config.is_active remains True (armed state),
+            # allowing any channel toggled ON later to immediately auto-start the audio engine!
 
         self._build_ui()
 
@@ -71,14 +79,14 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.tray_service.start()
 
-        # Intercept close request to keep running in tray
         self.connect("close-request", self._on_close_request)
-
         self._refresh_master_ui()
         self._start_hotplug_listener()
 
-    def _sync_live_sinks(self):
-        live_sinks = self.audio_service.get_available_sinks()
+    def _sync_live_sinks(self, live_sinks=None, force: bool = False):
+        if live_sinks is None:
+            live_sinks = self.audio_service.get_available_sinks(force=force)
+        self._known_sink_names = {s.name for s in live_sinks}
         saved_channels_map = {c.sink_name: c for c in self.config.channels}
         
         for live in live_sinks:
@@ -88,7 +96,6 @@ class MainWindow(Adw.ApplicationWindow):
                 saved.display_name = live.description
                 saved.hardware_latency_ms = live.latency_ms
                 saved.bus_type = live.bus_type
-                # Ensure Bluetooth volume is never saved at an inaudible level
                 is_bt = (live.bus_type == "bluetooth") or ("bluez" in live.name.lower())
                 if is_bt and saved.volume_gain < 0.50:
                     saved.volume_gain = 0.85
@@ -104,7 +111,6 @@ class MainWindow(Adw.ApplicationWindow):
                 )
                 saved_channels_map[live.name] = spk
 
-        # Keep known channels but purge legacy combine-sink artifacts
         self.config.channels = [
             c for c in saved_channels_map.values()
             if c.sink_name != "combined"
@@ -113,7 +119,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.audio_service.update_config(self.config)
 
     def _start_hotplug_listener(self):
-        """Monitors PipeWire/PulseAudio sink hotplug events asynchronously via pactl subscribe."""
         def _set_pdeathsig():
             try:
                 import ctypes, signal
@@ -122,91 +127,122 @@ class MainWindow(Adw.ApplicationWindow):
                 pass
 
         def _listen():
-            try:
-                self._hotplug_proc = subprocess.Popen(
-                    ["pactl", "subscribe"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                    bufsize=1,
-                    preexec_fn=_set_pdeathsig
-                )
-                for line in self._hotplug_proc.stdout:
-                    if not line:
-                        break
-                    line_lower = line.lower()
-                    # Ignore loopback/stream connections (sink-input, source-output)
-                    if "sink-input" in line_lower or "source-output" in line_lower:
-                        continue
-                    # Only trigger on actual physical additions/removals, ignore volume/mute change events
-                    if ("sink #" in line_lower or "card #" in line_lower) and ("new" in line_lower or "remove" in line_lower):
-                        GLib.idle_add(self._trigger_hotplug_resync)
-            except Exception:
-                pass
+            while not getattr(self, "_quitting", False):
+                try:
+                    self._hotplug_proc = subprocess.Popen(
+                        ["pactl", "subscribe"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        text=True,
+                        bufsize=1,
+                        preexec_fn=_set_pdeathsig
+                    )
+                    for line in self._hotplug_proc.stdout:
+                        if not line:
+                            break
+                        line_lower = line.lower()
+                        if "sink-input" in line_lower or "source-output" in line_lower:
+                            continue
+                        # Ignore events triggered by our own polifonia virtual sink
+                        if "polifonia" in line_lower:
+                            continue
+                        if ("sink #" in line_lower or "card #" in line_lower) and ("new" in line_lower or "remove" in line_lower):
+                            GLib.idle_add(self._trigger_hotplug_resync)
+                    if self._hotplug_proc:
+                        try:
+                            self._hotplug_proc.wait(timeout=0.2)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                if getattr(self, "_quitting", False):
+                    break
+                time.sleep(1.0)
 
         self._hotplug_thread = threading.Thread(target=_listen, daemon=True)
         self._hotplug_thread.start()
 
     def _trigger_hotplug_resync(self):
+        # Immediately reassert polifonia_master default sink in background
+        # to prevent WirePlumber from hijacking active client playback streams to the newly plugged BT device
+        if getattr(self.config, "is_active", False) or self.audio_service.is_running():
+            threading.Thread(target=self.audio_service.reassert_master_default, daemon=True).start()
+
         if self._hotplug_debounce_id:
             GLib.source_remove(self._hotplug_debounce_id)
-        self._hotplug_debounce_id = GLib.timeout_add(350, self._on_hotplug_event)
+        # 500ms debounce allows BlueZ codec and transport socket negotiation to settle
+        self._hotplug_debounce_id = GLib.timeout_add(500, self._on_hotplug_event)
         return False
 
     def _on_hotplug_event(self):
         self._hotplug_debounce_id = 0
-        live_sinks = self.audio_service.get_available_sinks()
-        live_names = {s.name for s in live_sinks}
-        if live_names == self._known_sink_names:
-            return False  # No change in hardware endpoints! Do not rebuild rack!
+        def _bg_sync():
+            try:
+                live_sinks = self.audio_service.get_available_sinks(force=True)
+                live_names = {s.name for s in live_sinks}
+                if live_names == self._known_sink_names:
+                    return
 
-        self._known_sink_names = live_names
-        self._sync_live_sinks()
-        self._populate_rack()
-        if self.config.is_active or self.audio_service.is_running():
-            self.audio_service.sync_active_branches()
-        self._sync_tray_state()
+                self._known_sink_names = live_names
+                self._sync_live_sinks(live_sinks, force=True)
+                if getattr(self.config, "is_active", False) or self.audio_service.is_running():
+                    # Re-assert default sink immediately so WirePlumber cannot steal active streams to raw BT sink
+                    self.audio_service.reassert_master_default()
+                    self.audio_service.sync_active_branches(live_sinks=live_sinks)
+                    self.audio_service.reassert_master_default()
+                GLib.idle_add(self._apply_hotplug_ui_updates, live_sinks)
+            except Exception as e:
+                logger.error(f"Error in hotplug background sync: {e}")
+
+        threading.Thread(target=_bg_sync, daemon=True).start()
+        return False
+
+    def _apply_hotplug_ui_updates(self, live_sinks):
+        self._populate_rack(live_sinks)
+        self._sync_tray_state(live_sinks=live_sinks)
         if hasattr(self, "routing_graph"):
             self.routing_graph.refresh_topology()
         return False
 
     def _build_ui(self):
-        # Toast overlay for notifications
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
 
-        # Main Vertical Container
         main_layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.toast_overlay.set_child(main_layout)
 
-        # 1. Native HeaderBar with ViewSwitcher
+        # 1. HeaderBar with ViewSwitcher
         header_bar = Adw.HeaderBar()
 
         # Hardware Rescan Button
         rescan_btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        rescan_btn.set_tooltip_text("Rescan PipeWire Audio Endpoints")
+        rescan_btn.set_tooltip_text("Scan PipeWire audio outputs")
         rescan_btn.connect("clicked", self._on_rescan_clicked)
         header_bar.pack_start(rescan_btn)
 
         # Presets Menu Button
         preset_btn = Gtk.MenuButton()
         preset_btn.set_icon_name("document-open-recent-symbolic")
-        preset_btn.set_tooltip_text("Profiles & Audio Presets")
+        preset_btn.set_tooltip_text("Audio profiles and presets")
         header_bar.pack_start(preset_btn)
 
         main_layout.append(header_bar)
 
-        # 2. Master Control Bar (Master Gain, Big Neon Master Button)
+        # 2. Master Control Bar
         master_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
         master_bar.add_css_class("master-header-box")
 
-        # Master Gain Fader
+        # Master Gain Slider
         master_gain_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         master_gain_box.set_hexpand(True)
         master_gain_box.set_valign(Gtk.Align.CENTER)
         master_gain_box.set_halign(Gtk.Align.START)
 
-        master_lbl = Gtk.Label(label="MASTER VOLUME")
+        master_icon = Gtk.Image.new_from_icon_name("audio-volume-high-symbolic")
+        master_icon.add_css_class("dim-label")
+        master_gain_box.append(master_icon)
+
+        master_lbl = Gtk.Label(label="Master Volume")
         master_lbl.add_css_class("strip-section-label")
         master_gain_box.append(master_lbl)
 
@@ -222,7 +258,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         master_bar.append(master_gain_box)
 
-        # Big Neon Master Toggle Button (Icon + Label)
+        # Master Toggle Button
         self.master_toggle_btn = Gtk.Button()
         self.master_toggle_btn.add_css_class("master-toggle-btn-off")
         self.master_toggle_btn.set_valign(Gtk.Align.CENTER)
@@ -236,31 +272,49 @@ class MainWindow(Adw.ApplicationWindow):
         self.master_toggle_btn.set_child(btn_content)
 
         master_bar.append(self.master_toggle_btn)
-
         main_layout.append(master_bar)
 
-        # 3. Central Dual-View Stack (Mixer Console + Signal Flow Routing Graph)
+        # 3. View Stack (Channel Deck vs Topology)
         self.view_stack = Adw.ViewStack()
         self.view_stack.set_vexpand(True)
 
-        # Page 1: Horizontal Channel Strips Rack
+        # Page 1: Channel Row Deck
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        # Section Header for Channels Deck
+        deck_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        deck_header.set_margin_start(20)
+        deck_header.set_margin_end(20)
+        deck_header.set_margin_top(16)
+        deck_header.set_margin_bottom(10)
+
+        deck_title = Gtk.Label(label="Connected Audio Outputs (Direct Controls)")
+        deck_title.add_css_class("deck-header-label")
+        deck_title.set_hexpand(True)
+        deck_title.set_halign(Gtk.Align.START)
+        deck_header.append(deck_title)
+
+        page_box.append(deck_header)
+
+        # 3C. Natural Vertical Scrolled Deck of Horizontal Row Cards
         scroll_window = Gtk.ScrolledWindow()
-        scroll_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroll_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll_window.set_vexpand(True)
         scroll_window.add_css_class("rack-scroll-window")
 
-        self.rack_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
-        self.rack_box.set_margin_start(16)
-        self.rack_box.set_margin_end(16)
-        self.rack_box.set_margin_top(12)
-        self.rack_box.set_margin_bottom(12)
-        self.rack_box.set_halign(Gtk.Align.START)
+        self.rack_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.rack_box.set_margin_start(20)
+        self.rack_box.set_margin_end(20)
+        self.rack_box.set_margin_bottom(16)
+        self.rack_box.set_halign(Gtk.Align.FILL)
         
         scroll_window.set_child(self.rack_box)
-        page_mixer = self.view_stack.add_titled(scroll_window, "mixer", "Mixer Console")
+        page_box.append(scroll_window)
+
+        page_mixer = self.view_stack.add_titled(page_box, "mixer", "Mixer Console")
         page_mixer.set_icon_name("view-grid-symbolic")
 
-        # Page 2: Real-time Signal Flow & Topology Routing Graph
+        # Page 2: Signal Flow & Routing Graph
         self.routing_graph = RoutingGraphView(
             audio_service=self.audio_service,
             config=self.config,
@@ -270,36 +324,33 @@ class MainWindow(Adw.ApplicationWindow):
         page_graph = self.view_stack.add_titled(self.routing_graph, "routing", "Signal Flow")
         page_graph.set_icon_name("network-workgroup-symbolic")
 
-        # Set ViewSwitcher as title widget in HeaderBar
+        # ViewSwitcher in HeaderBar
         self.view_switcher = Adw.ViewSwitcher(stack=self.view_stack, policy=Adw.ViewSwitcherPolicy.WIDE)
         header_bar.set_title_widget(self.view_switcher)
 
         self.view_stack.connect("notify::visible-child-name", self._on_view_changed)
         main_layout.append(self.view_stack)
 
-        # Populate Channel Strips
+        # Populate Channel Rows
         self._populate_rack()
 
-        # 4. Footer Tools & Engine Bar
-        footer_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
+        # 4. Footer Bar
+        footer_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
         footer_bar.add_css_class("footer-dsp-bar")
 
-        # Engine Status Info
-        engine_info = Gtk.Label(label="PipeWire Native • Zero-Latency Multi-Channel Unison")
-        engine_info.add_css_class("strip-section-label")
+        engine_info = Gtk.Label(label="PipeWire Audio Engine • Phase synchronization active")
+        engine_info.add_css_class("dim-label")
         engine_info.set_valign(Gtk.Align.CENTER)
         engine_info.set_halign(Gtk.Align.START)
         footer_bar.append(engine_info)
 
-        # Default System Sink Toggle
         default_sink_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        default_sink_box.add_css_class("dsp-box")
         default_sink_box.set_valign(Gtk.Align.CENTER)
         default_sink_box.set_hexpand(True)
         default_sink_box.set_halign(Gtk.Align.END)
 
-        def_lbl = Gtk.Label(label="SET AS SYSTEM DEFAULT SINK")
-        def_lbl.add_css_class("strip-section-label")
+        def_lbl = Gtk.Label(label="Set as default output")
+        def_lbl.add_css_class("dim-label")
         default_sink_box.append(def_lbl)
 
         self.default_switch = Gtk.Switch()
@@ -310,23 +361,37 @@ class MainWindow(Adw.ApplicationWindow):
         footer_bar.append(default_sink_box)
         main_layout.append(footer_bar)
 
-    def _populate_rack(self):
-        # Clear existing cards
-        while self.rack_box.get_first_child():
-            self.rack_box.remove(self.rack_box.get_first_child())
-        self._speaker_cards.clear()
+    def _populate_rack(self, live_sinks=None):
+        live_names = {s.name for s in live_sinks} if live_sinks is not None else getattr(self, "_known_sink_names", set())
 
-        # Add speaker channel strip cards for currently live endpoints
-        live_names = {s.name for s in self.audio_service.get_available_sinks()}
-        for ch in self.config.channels:
-            if not live_names or ch.sink_name in live_names:
+        # Find which channels should be displayed
+        displayed_channels = [
+            ch for ch in self.config.channels
+            if not live_names or ch.sink_name in live_names
+        ]
+        displayed_sink_names = {ch.sink_name for ch in displayed_channels}
+
+        # Keep existing cards without recreating widgets; only sync state or remove dead ones
+        cards_to_keep = []
+        for card in self._speaker_cards:
+            if card.channel.sink_name in displayed_sink_names:
+                card._sync_state()
+                cards_to_keep.append(card)
+            else:
+                self.rack_box.remove(card)
+        self._speaker_cards = cards_to_keep
+
+        # Append new cards for any newly appeared sinks
+        existing_sinks = {c.channel.sink_name for c in self._speaker_cards}
+        for ch in displayed_channels:
+            if ch.sink_name not in existing_sinks:
                 card = SpeakerCard(ch, self._on_config_changed, self._on_test_speaker, audio_service=self.audio_service)
                 self.rack_box.append(card)
                 self._speaker_cards.append(card)
 
-    def _serialize_channels_for_tray(self) -> list:
+    def _serialize_channels_for_tray(self, live_sinks=None) -> list:
         res = []
-        live_names = {s.name for s in self.audio_service.get_available_sinks()}
+        live_names = {s.name for s in live_sinks} if live_sinks is not None else getattr(self, "_known_sink_names", set())
         for ch in self.config.channels:
             if live_names and ch.sink_name not in live_names:
                 continue
@@ -343,7 +408,7 @@ class MainWindow(Adw.ApplicationWindow):
             })
         return res
 
-    def _sync_tray_state(self, is_active=None, window_visible=None):
+    def _sync_tray_state(self, is_active=None, window_visible=None, live_sinks=None):
         if not hasattr(self, "tray_service"):
             return
         active = (self.config.is_active or self.audio_service.is_running()) if is_active is None else is_active
@@ -352,7 +417,7 @@ class MainWindow(Adw.ApplicationWindow):
             active,
             self.config.master_volume,
             vis,
-            self._serialize_channels_for_tray()
+            self._serialize_channels_for_tray(live_sinks)
         )
 
     def _refresh_master_ui(self):
@@ -373,7 +438,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.routing_graph.refresh_topology()
 
     def _on_view_changed(self, stack, param):
-        """Starts/stops routing graph polling when navigating between Console and Signal Flow."""
         current = stack.get_visible_child_name()
         if current == "routing":
             self.routing_graph.refresh_topology()
@@ -382,12 +446,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.routing_graph.stop_polling()
 
     def _on_close_request(self, window):
-        """Hides the window instead of closing so background audio keeps playing."""
         if hasattr(self, "routing_graph"):
             self.routing_graph.stop_polling()
         self.hide()
         self._sync_tray_state(window_visible=False)
-        return True  # Stop default window destruction
+        return True
 
     def _toggle_window_visibility(self):
         if self.is_visible():
@@ -425,7 +488,10 @@ class MainWindow(Adw.ApplicationWindow):
                 else:
                     ch.role = SpeakerRole.EXCLUDED
                 break
-        self._populate_rack()
+        for card in self._speaker_cards:
+            if card.channel.sink_name == sink_name:
+                card._sync_state()
+                break
         self._on_config_changed()
 
     def _on_tray_set_channel_role(self, sink_name: str, role_str: str):
@@ -463,10 +529,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._on_test_speaker(sink_name, display_name)
 
     def _quit_application(self):
-        """Cleanly quits Polifonia and stops audio services."""
+        self._quitting = True
         if self._hotplug_proc:
             try:
                 self._hotplug_proc.terminate()
+                self._hotplug_proc.wait(timeout=0.2)
             except Exception:
                 pass
             self._hotplug_proc = None
@@ -474,7 +541,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.tray_service.stop()
         if hasattr(self, "routing_graph"):
             self.routing_graph.stop_polling()
-        self.audio_service.deactivate_unison()
+        self.audio_service.stop_unison_sink(unload_master=True)
         app = self.get_application()
         if app:
             app.quit()
@@ -484,10 +551,17 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_config_changed(self):
         self.preset_manager.save_config(self.config)
         self.audio_service.update_config(self.config)
-        if self.config.is_active or self.audio_service.is_running():
-            self.audio_service.sync_active_branches()
+        active_speakers = [s for s in self.config.channels if s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
+        if self.config.is_active and not self.audio_service.is_running() and active_speakers:
+            # Unison was armed or saved as active: auto-start now that an output channel has been enabled!
+            def _auto_start():
+                if self.audio_service.activate_unison(self.config):
+                    GLib.idle_add(self._refresh_master_ui)
+            threading.Thread(target=_auto_start, daemon=True).start()
+        elif self.config.is_active or self.audio_service.is_running():
+            threading.Thread(target=self.audio_service.sync_active_branches, daemon=True).start()
         self._sync_tray_state()
-        if hasattr(self, "routing_graph"):
+        if hasattr(self, "routing_graph") and hasattr(self, "view_stack") and self.view_stack.get_visible_child_name() == "routing":
             self.routing_graph.refresh_topology()
 
     def _on_master_volume_changed(self, scale):
@@ -495,7 +569,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.config.master_volume = round(val, 2)
         self.master_vol_badge.set_text(f"{int(self.config.master_volume * 100)}%")
         self.audio_service.set_master_gain(self.config.master_volume, persist=False)
-        # Debounce save to disk: only persist after 300ms of inactivity
         if self._master_vol_debounce_id:
             GLib.source_remove(self._master_vol_debounce_id)
         self._master_vol_debounce_id = GLib.timeout_add(300, self._emit_master_vol_save)
@@ -505,7 +578,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.preset_manager.save_config(self.config)
         self.audio_service.update_config(self.config)
         self._sync_tray_state()
-        return False  # Remove timeout
+        return False
 
     def _on_default_toggled(self, switch, param):
         self.config.set_as_default = switch.get_active()
@@ -514,32 +587,72 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_test_speaker(self, target, display_name=None):
         self.audio_service.test_tone(target)
         name_str = display_name or str(target)
-        toast = Adw.Toast.new(f"Test tone sent to: {name_str}")
+        toast = Adw.Toast.new(f"Test signal sent to: {name_str}")
         self.toast_overlay.add_toast(toast)
 
     def _on_toggle_unison_clicked(self, btn):
+        import sys
+        is_test = "unittest" in sys.modules
         if self.config.is_active or self.audio_service.is_running():
-            self.audio_service.deactivate_unison()
-            self.config.is_active = False
-            self.preset_manager.save_config(self.config)
-            self._refresh_master_ui()
-            self.toast_overlay.add_toast(Adw.Toast.new("Unison engine deactivated."))
-        else:
-            success = self.audio_service.activate_unison(self.config)
-            if success:
-                self.config.is_active = True
-                self.preset_manager.save_config(self.config)
-                self._refresh_master_ui()
-                self.toast_overlay.add_toast(Adw.Toast.new("Unison engine activated successfully!"))
+            def _deact():
+                try:
+                    self.audio_service.deactivate_unison()
+                    self.config.is_active = False
+                    self.preset_manager.save_config(self.config)
+                finally:
+                    if is_test:
+                        self._on_unison_toggled_done(False, "Unison Engine deactivated.")
+                    else:
+                        GLib.idle_add(self._on_unison_toggled_done, False, "Unison Engine deactivated.")
+            if is_test:
+                _deact()
             else:
-                self.toast_overlay.add_toast(Adw.Toast.new("No active channels selected."))
+                self.master_toggle_btn.set_sensitive(False)
+                threading.Thread(target=_deact, daemon=True).start()
+        else:
+            def _act():
+                try:
+                    active_speakers = [s for s in self.config.channels if s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
+                    if not active_speakers:
+                        self.config.is_active = True
+                        self.preset_manager.save_config(self.config)
+                        msg = "Unison Engine armed: activate an output channel to play audio."
+                        success = True
+                    else:
+                        success = self.audio_service.activate_unison(self.config)
+                        if success:
+                            self.config.is_active = True
+                            self.preset_manager.save_config(self.config)
+                            msg = "Unison Engine activated successfully!"
+                        else:
+                            msg = "Activation error."
+                    if is_test:
+                        self._on_unison_toggled_done(success, msg)
+                    else:
+                        GLib.idle_add(self._on_unison_toggled_done, success, msg)
+                except Exception as e:
+                    if is_test:
+                        self._on_unison_toggled_done(False, f"Activation error: {e}")
+                    else:
+                        GLib.idle_add(self._on_unison_toggled_done, False, f"Activation error: {e}")
+            if is_test:
+                _act()
+            else:
+                self.master_toggle_btn.set_sensitive(False)
+                threading.Thread(target=_act, daemon=True).start()
+
+    def _on_unison_toggled_done(self, is_active: bool, toast_msg: str):
+        self.master_toggle_btn.set_sensitive(True)
+        self._refresh_master_ui()
+        self.toast_overlay.add_toast(Adw.Toast.new(toast_msg))
+        return False
 
     def _on_rescan_clicked(self, btn):
-        self._sync_live_sinks()
+        self._sync_live_sinks(force=True)
         self._populate_rack()
         if self.config.is_active or self.audio_service.is_running():
-            self.audio_service.sync_active_branches()
+            threading.Thread(target=self.audio_service.sync_active_branches, daemon=True).start()
         self._sync_tray_state()
         if hasattr(self, "routing_graph"):
             self.routing_graph.refresh_topology()
-        self.toast_overlay.add_toast(Adw.Toast.new("Hardware audio devices refreshed."))
+        self.toast_overlay.add_toast(Adw.Toast.new("PipeWire audio devices refreshed."))

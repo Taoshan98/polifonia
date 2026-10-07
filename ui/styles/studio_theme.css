@@ -1,316 +1,341 @@
-/* Polifonia Audio Studio - Professional Digital Console & Dark Theme */
+/* Polifonia Audio Studio - Nordic Minimal Studio Theme */
+/* Palette: Deep Slate (#18191f), Electric Indigo (#4f6bff), Sage Green (#2ec27e), Amber (#f5a623) */
 
 window {
-    background-color: #0b0d11;
-    color: #e2e8f0;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: #18191f;
+    color: #f4f5f8;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Cantarell", "Segoe UI", Roboto, sans-serif;
 }
 
 headerbar {
-    background: linear-gradient(180deg, #161922 0%, #10121a 100%);
-    border-bottom: 1px solid #242938;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    background-color: #15161b;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: none;
+    padding: 0 8px;
 }
 
-/* Master Header Section */
+/* Master Control Area in Header/Subheader */
 .master-header-box {
-    background: linear-gradient(180deg, #131620 0%, #0e1017 100%);
-    border-bottom: 1px solid #1f2533;
-    padding: 12px 24px;
+    background-color: #1c1e26;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 10px 24px;
 }
 
 .studio-brand-title {
-    font-size: 17px;
-    font-weight: 800;
-    letter-spacing: 0.5px;
-    color: #ffffff;
-}
-
-.status-badge-active {
-    background: rgba(0, 229, 255, 0.15);
-    border: 1px solid #00e5ff;
-    color: #00e5ff;
-    font-size: 11px;
-    font-weight: bold;
-    border-radius: 20px;
-    padding: 4px 12px;
-    box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
-}
-
-.status-badge-idle {
-    background: #181c26;
-    border: 1px solid #2a3142;
-    color: #7a869a;
-    font-size: 11px;
-    font-weight: bold;
-    border-radius: 20px;
-    padding: 4px 12px;
-}
-
-.master-toggle-btn-on {
-    background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
-    color: #ffffff;
-    font-weight: 800;
     font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: #f4f5f8;
+}
+
+/* Master Power Pill Button */
+.master-toggle-btn-on {
+    background-color: #e05260;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 12.5px;
+    letter-spacing: 0.3px;
     border: none;
-    border-radius: 10px;
-    padding: 8px 22px;
-    box-shadow: 0 0 18px rgba(0, 210, 255, 0.45);
+    border-radius: 9999px;
+    padding: 7px 18px;
+    box-shadow: 0 2px 8px rgba(224, 82, 96, 0.25);
+    transition: all 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.master-toggle-btn-on:hover {
+    background-color: #eb606e;
+    box-shadow: 0 3px 12px rgba(224, 82, 96, 0.35);
 }
 
 .master-toggle-btn-off {
-    background: #1c212e;
-    color: #94a3b8;
+    background-color: #4f6bff;
+    color: #ffffff;
     font-weight: 700;
-    font-size: 14px;
-    border: 1px solid #2d374d;
-    border-radius: 10px;
-    padding: 8px 22px;
+    font-size: 12.5px;
+    letter-spacing: 0.3px;
+    border: none;
+    border-radius: 9999px;
+    padding: 7px 18px;
+    box-shadow: 0 2px 8px rgba(79, 107, 255, 0.25);
+    transition: all 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .master-toggle-btn-off:hover {
-    background: #252b3b;
-    color: #ffffff;
+    background-color: #637dff;
+    box-shadow: 0 3px 12px rgba(79, 107, 255, 0.35);
 }
 
-/* Central Rack Area */
-.rack-scroll-window {
-    background-color: #0b0d11;
-    padding: 16px;
+/* Status Badges */
+.status-badge-active {
+    background: rgba(46, 194, 126, 0.14);
+    border: 1px solid rgba(46, 194, 126, 0.3);
+    color: #2ec27e;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 20px;
+    padding: 3px 10px;
 }
 
-/* Channel Strip Card */
+.status-badge-idle {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #8b92a5;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 20px;
+    padding: 3px 10px;
+}
+
+/* Virtual Soundstage Section */
+.soundstage-container {
+    background-color: #14151a;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    min-height: 280px;
+}
+
+.soundstage-header-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    color: #8b92a5;
+    text-transform: uppercase;
+}
+
+/* Horizontal Channel Row Card (Option 2 All-At-A-Glance Deck) */
 .channel-card {
-    background: linear-gradient(180deg, #161922 0%, #11131a 100%);
-    border: 1px solid #242a38;
-    border-radius: 14px;
-    padding: 14px 12px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
-    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    background-color: #21232b;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    padding: 12px 18px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+    min-height: 64px;
 }
 
 .channel-card:hover {
-    border-color: #3b455c;
-    box-shadow: 0 8px 24px rgba(0, 229, 255, 0.12);
+    background-color: #262933;
+    border-color: rgba(79, 107, 255, 0.35);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
+.channel-card-disabled {
+    opacity: 0.55;
+    background-color: #1b1c22;
+}
+
+/* Strip Header & Typography */
 .strip-header {
-    margin-bottom: 4px;
+    margin-bottom: 0px;
 }
 
 .strip-icon {
-    color: #00e5ff;
+    color: #4f6bff;
 }
 
 .conn-badge {
-    background-color: #1f2533;
-    color: #00e5ff;
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #8b92a5;
     font-size: 10px;
-    font-weight: 800;
-    padding: 2px 6px;
-    border-radius: 4px;
-    border: 1px solid #2d364a;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-feature-settings: "tnum";
 }
 
 .strip-title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #ffffff;
-    margin-top: 4px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #f4f5f8;
 }
 
-/* Channel Strip Custom Title & Edit Button */
 .strip-title-custom {
-    color: #00e5ff;
+    color: #6f88ff;
+    font-weight: 700;
 }
 
 button.strip-edit-btn,
 .strip-edit-btn {
-    min-width: 22px;
-    min-height: 22px;
-    padding: 2px 4px;
-    margin-top: 2px;
-    opacity: 0.55;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px;
+    opacity: 0.5;
     border-radius: 5px;
-    color: #94a3b8;
+    color: #f4f5f8;
     background: transparent;
     border: none;
-    box-shadow: none;
-    outline: none;
-    transition: all 150ms ease;
+    transition: opacity 120ms ease, background-color 120ms ease;
 }
 
 button.strip-edit-btn:hover,
 .strip-edit-btn:hover {
     opacity: 1.0;
-    color: #00e5ff;
-    background: rgba(0, 229, 255, 0.12);
-    box-shadow: none;
-    outline: none;
-    border: none;
-}
-
-button.strip-edit-btn:active,
-button.strip-edit-btn:checked,
-.strip-edit-btn:active,
-.strip-edit-btn:checked {
-    opacity: 1.0;
-    color: #00e5ff;
-    background: rgba(0, 229, 255, 0.22);
-    box-shadow: none;
-    outline: none;
-    border: none;
+    background: rgba(79, 107, 255, 0.15);
+    color: #4f6bff;
 }
 
 .strip-section-label {
     font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.8px;
-    color: #64748b;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #8b92a5;
     text-transform: uppercase;
 }
 
-/* Precision Delay Step & Reset Buttons */
+/* Channel Rack / Scroll Window */
+.rack-scroll-window {
+    background-color: #18191f;
+    padding: 16px 20px;
+}
+
+/* Delay Step & Reset Controls */
 button.delay-btn,
 .delay-btn {
     min-width: 26px;
-    min-height: 24px;
-    padding: 2px 4px;
+    min-height: 26px;
+    padding: 2px 6px;
     font-size: 11px;
-    font-weight: 800;
-    font-family: monospace;
-    border-radius: 5px;
-    background: #181d28;
-    color: #94a3b8;
-    border: 1px solid #283144;
-    transition: all 120ms ease;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #f4f5f8;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: background-color 120ms ease, border-color 120ms ease;
 }
 
 button.delay-btn:hover,
 .delay-btn:hover {
-    background: #252b3b;
-    color: #00e5ff;
-    border-color: #00e5ff;
-    box-shadow: 0 0 6px rgba(0, 229, 255, 0.3);
+    background: rgba(79, 107, 255, 0.16);
+    color: #6f88ff;
+    border-color: rgba(79, 107, 255, 0.4);
 }
 
 button.delay-reset-btn,
 .delay-reset-btn {
-    min-width: 22px;
-    min-height: 24px;
-    padding: 2px 4px;
+    min-width: 24px;
+    min-height: 26px;
+    padding: 2px 6px;
     font-size: 11px;
-    font-weight: 800;
-    font-family: monospace;
-    border-radius: 5px;
-    background: #181d28;
-    color: #64748b;
-    border: 1px solid #283144;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #8b92a5;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     transition: all 120ms ease;
 }
 
 button.delay-reset-btn:hover,
 .delay-reset-btn:hover {
-    background: #252b3b;
-    color: #f59e0b;
-    border-color: #f59e0b;
-    box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
+    background: rgba(245, 166, 35, 0.15);
+    color: #f5a623;
+    border-color: rgba(245, 166, 35, 0.4);
 }
 
-/* Vertical Volume Fader */
-.vertical-fader {
-    min-height: 140px;
-    margin: 4px 0;
-}
-
-.vertical-fader highlight {
-    background: linear-gradient(180deg, #00ff88 0%, #00d2ff 100%);
-    border-radius: 4px;
-}
-
-.vertical-fader trough {
-    background-color: #1a1e29;
-    border: 1px solid #293040;
-    border-radius: 4px;
-    min-width: 8px;
-}
-
-.vertical-fader slider {
-    background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
-    border: 2px solid #00e5ff;
-    border-radius: 4px;
-    min-width: 24px;
-    min-height: 14px;
-    box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
-}
-
+/* Badges */
 .vol-badge {
-    background: #181d28;
-    color: #00ff88;
-    font-size: 11px;
-    font-weight: 800;
-    font-family: monospace;
-    padding: 2px 6px;
-    border-radius: 4px;
-    border: 1px solid #283144;
+    background: rgba(79, 107, 255, 0.14);
+    color: #6f88ff;
+    font-size: 11.5px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    padding: 2px 8px;
+    border-radius: 6px;
 }
 
 .delay-badge {
-    background: #181d28;
-    color: #00d2ff;
-    font-size: 10px;
-    font-weight: 700;
-    font-family: monospace;
-    padding: 2px 6px;
-    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #f4f5f8;
+    font-size: 11px;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+    padding: 2px 8px;
+    border-radius: 6px;
 }
 
-.horizontal-delay-slider highlight {
-    background: #00d2ff;
+/* Custom Scales */
+scale highlight {
+    background-color: #4f6bff;
+    border-radius: 3px;
+}
+
+scale trough {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+}
+
+scale slider {
+    background-color: #f4f5f8;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 9999px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.vertical-fader {
+    min-height: 120px;
+    margin: 4px 0;
 }
 
 .strip-test-btn {
-    background: #1b202c;
-    border: 1px solid #2d3548;
-    color: #cbd5e1;
-    font-size: 11px;
-    font-weight: 700;
     border-radius: 8px;
-    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f4f5f8;
+    transition: all 150ms ease;
 }
 
 .strip-test-btn:hover {
-    background: #283042;
-    color: #00e5ff;
-    border-color: #00e5ff;
+    background: rgba(79, 107, 255, 0.15);
+    color: #6f88ff;
+    border-color: rgba(79, 107, 255, 0.35);
 }
 
-/* Footer DSP Rack */
+/* Role Selector Dropdown */
+.role-pill {
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f4f5f8;
+}
+
+.role-pill:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Footer Section */
 .footer-dsp-bar {
-    background: linear-gradient(180deg, #10121a 0%, #0a0b0e 100%);
-    border-top: 1px solid #1f2533;
-    padding: 12px 24px;
+    background-color: #15161b;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    padding: 10px 24px;
 }
 
 .dsp-box {
-    background: #141720;
-    border: 1px solid #232a3a;
-    border-radius: 10px;
-    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    padding: 6px 12px;
 }
 
 .dsp-title {
     font-size: 12px;
-    font-weight: 800;
-    color: #e2e8f0;
+    font-weight: 600;
+    color: #f4f5f8;
 }
 
 .dsp-freq-badge {
-    background: #1e2433;
-    color: #a855f7;
+    background: rgba(79, 107, 255, 0.14);
+    color: #6f88ff;
     font-size: 11px;
-    font-weight: 800;
-    font-family: monospace;
-    padding: 2px 8px;
-    border-radius: 4px;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+    padding: 2px 7px;
+    border-radius: 5px;
 }

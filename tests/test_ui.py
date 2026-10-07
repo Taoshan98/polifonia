@@ -463,6 +463,71 @@ class TestUI(unittest.TestCase):
         self.assertEqual(win.view_stack.get_visible_child_name(), "mixer")
         self.assertFalse(win.routing_graph.canvas._is_active_view)
 
+    def test_startup_with_unison_active_and_zero_channels_remains_armed(self):
+        """Verify starting with unison active but 0 enabled channels keeps unison armed and auto-starts on enable."""
+        mock_audio_service = MagicMock()
+        mock_audio_service.get_available_sinks.return_value = [
+            AudioSink(id=1, name="alsa_sink", description="Wired", media_class="Audio/Sink", is_internal=False),
+            AudioSink(id=2, name="bluez_sink", description="BT", media_class="Audio/Sink", is_internal=False, bus_type="bluetooth")
+        ]
+        mock_audio_service.is_running.return_value = False
+        mock_audio_service.activate_unison.return_value = True
+
+        mock_preset_manager = MagicMock()
+        cfg = SystemConfig(
+            profile_name="Default",
+            is_active=True,
+            speakers={
+                "alsa_sink": SpeakerConfig(sink_id=1, sink_name="alsa_sink", role=SpeakerRole.EXCLUDED),
+                "bluez_sink": SpeakerConfig(sink_id=2, sink_name="bluez_sink", role=SpeakerRole.EXCLUDED, bus_type="bluetooth")
+            }
+        )
+        mock_preset_manager.load_config.return_value = cfg
+
+        win = MainWindow(self.app, mock_audio_service, mock_preset_manager)
+
+        # Config should remain armed (is_active = True)
+        self.assertTrue(win.config.is_active)
+        # activate_unison should not have been called yet since 0 channels were active
+        mock_audio_service.activate_unison.assert_not_called()
+
+        # Now user enables the wired speaker
+        win.config.channels[0].role = SpeakerRole.STEREO
+        win._on_config_changed()
+
+        # Audio engine must auto-start now that an active channel exists!
+        mock_audio_service.activate_unison.assert_called_with(win.config)
+
+    def test_toggle_unison_with_zero_channels_arms_engine(self):
+        """Verify clicking Activate Unison with no channels selected arms unison instead of erroring."""
+        mock_audio_service = MagicMock()
+        mock_audio_service.get_available_sinks.return_value = [
+            AudioSink(id=1, name="alsa_sink", description="Wired", media_class="Audio/Sink", is_internal=False)
+        ]
+        mock_audio_service.is_running.return_value = False
+        mock_audio_service.activate_unison.return_value = True
+
+        mock_preset_manager = MagicMock()
+        cfg = SystemConfig(
+            profile_name="Default",
+            is_active=False,
+            speakers={
+                "alsa_sink": SpeakerConfig(sink_id=1, sink_name="alsa_sink", role=SpeakerRole.EXCLUDED)
+            }
+        )
+        mock_preset_manager.load_config.return_value = cfg
+
+        win = MainWindow(self.app, mock_audio_service, mock_preset_manager)
+        self.assertFalse(win.config.is_active)
+
+        # Click Activate Unison when 0 channels are active
+        win._on_toggle_unison_clicked(None)
+
+        # Unison should be armed
+        self.assertTrue(win.config.is_active)
+        self.assertIn("DEACTIVATE", win.master_toggle_label.get_text())
+
 
 if __name__ == "__main__":
     unittest.main()
+

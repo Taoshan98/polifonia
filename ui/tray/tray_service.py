@@ -95,9 +95,14 @@ class TrayService:
         self._running = False
         if self.proc:
             try:
-                if self.proc.stdin:
+                if self.proc.stdin and not self.proc.stdin.closed:
                     self.proc.stdin.write(json.dumps({"type": "quit"}) + "\n")
                     self.proc.stdin.flush()
+            except Exception:
+                pass
+            try:
+                if self.proc.stdin and not self.proc.stdin.closed:
+                    self.proc.stdin.close()
             except Exception:
                 pass
             try:

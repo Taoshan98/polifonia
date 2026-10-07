@@ -39,7 +39,7 @@ class PolifoniaApplication(Adw.Application):
 
     def do_shutdown(self):
         if hasattr(self, "audio_engine"):
-            self.audio_engine.stop_unison_sink()
+            self.audio_engine.stop_unison_sink(unload_master=True)
         Adw.Application.do_shutdown(self)
 
 
@@ -49,7 +49,7 @@ def main():
     def _sig_handler(sig, frame):
         try:
             if hasattr(app, "audio_engine"):
-                app.audio_engine.stop_unison_sink()
+                app.audio_engine.stop_unison_sink(unload_master=True)
         except Exception:
             pass
         app.quit()

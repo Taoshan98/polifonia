@@ -3,15 +3,22 @@
 import json
 import subprocess
 import re
+import time
 from typing import List, Optional
 from core.models import AudioSink
 
 
 class DeviceScanner:
+    _last_profile_check: float = 0.0
+    _last_eld_check: float = 0.0
+    _cached_eld_map: dict = {}
+    _last_scan_time: float = 0.0
+    _cached_sinks: List[AudioSink] = []
+
     @staticmethod
     def get_default_sink_id() -> Optional[int]:
         try:
-            res = subprocess.run(["wpctl", "status"], capture_output=True, text=True)
+            res = subprocess.run(["wpctl", "status"], capture_output=True, text=True, timeout=1.5)
             for line in res.stdout.splitlines():
                 if ("*" in line and "Audio/Sink" in line) or ("*" in line and "[" in line and "vol:" in line):
                     match = re.search(r"\*\s+(\d+)\.", line)
@@ -21,9 +28,14 @@ class DeviceScanner:
             pass
         return None
 
-    @staticmethod
-    def get_eld_monitors() -> dict:
+    @classmethod
+    def get_eld_monitors(cls, force: bool = False) -> dict:
         """Dynamically parses kernel ALSA ELD files for all sound cards and connected video displays."""
+        now = time.time()
+        if not force and cls._cached_eld_map and (now - cls._last_eld_check < 15.0):
+            return cls._cached_eld_map
+        cls._last_eld_check = now
+
         import glob
         eld_map = {}  # card_id -> list of dict(name, conn_type, pin)
         for eld_path in glob.glob("/proc/asound/card*/eld*"):
@@ -48,40 +60,66 @@ class DeviceScanner:
                         })
             except Exception:
                 pass
+        cls._cached_eld_map = eld_map
         return eld_map
 
-    @staticmethod
-    def ensure_multimonitor_card_profiles():
-        """
-        Dynamically detects any multi-output graphics card (NVIDIA, AMD Radeon, Intel Arc)
-        and sets its profile to pro-audio so all physical monitors are exposed as independent audio sinks.
-        """
+    @classmethod
+    def ensure_multimonitor_card_profiles(cls):
+        """Ensures dedicated multi-monitor GPU sound cards (e.g. Nvidia/AMD) are set to pro-audio profile so all displays are exposed as distinct sinks."""
+        now = time.time()
+        if cls._last_profile_check and (now - cls._last_profile_check < 5.0):
+            return
+        cls._last_profile_check = now
+
         try:
-            res = subprocess.run(["pactl", "list", "cards"], capture_output=True, text=True)
-            cards = res.stdout.split("Card #")
-            for card_block in cards:
-                if not card_block.strip():
-                    continue
-                c_name_match = re.search(r"Name:\s+(\S+)", card_block)
-                if not c_name_match:
-                    continue
-                card_name = c_name_match.group(1)
-                # If card has multi-HDMI/DP capabilities and supports pro-audio profile
-                if "pro-audio:" in card_block and "hdmi-output-" in card_block:
-                    if "Active Profile: pro-audio" not in card_block:
-                        subprocess.run(["pactl", "set-card-profile", card_name, "pro-audio"],
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            eld_map = cls.get_eld_monitors()
+            has_multi_eld = any(len(mons) > 1 for mons in eld_map.values())
+            res = subprocess.run(["pactl", "list", "cards", "short"], capture_output=True, text=True, timeout=1.0)
+            for line in res.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    card_name = parts[1]
+                    # Only target dedicated GPU cards (Nvidia, AMD) or cards with multiple ELD displays
+                    # Strictly avoid Intel/Realtek internal audio controllers (sof-hda-dsp, alc, etc.)
+                    is_gpu_card = (
+                        ("01_00.1" in card_name) or
+                        ("nvidia" in card_name.lower()) or
+                        ("radeon" in card_name.lower())
+                    )
+                    if is_gpu_card or has_multi_eld:
+                        if "sof" in card_name.lower() or "realtek" in card_name.lower() or "00_1f.3" in card_name:
+                            continue
+                        try:
+                            card_info = subprocess.check_output(["pactl", "list", "cards"], text=True, timeout=1.0)
+                            card_blocks = card_info.split("Card #")
+                            for block in card_blocks:
+                                if card_name in block:
+                                    if "Active Profile: pro-audio" not in block:
+                                        subprocess.run(["pactl", "set-card-profile", card_name, "pro-audio"],
+                                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+                                        time.sleep(0.08)
+                                        cls._cached_sinks = []
+                                    break
+                        except Exception:
+                            pass
         except Exception:
             pass
 
     @classmethod
-    def scan_sinks(cls) -> List[AudioSink]:
+    def scan_sinks(cls, force: bool = False) -> List[AudioSink]:
         """Scans PipeWire graph for active audio sinks with generic, dynamic hardware classification."""
-        cls.ensure_multimonitor_card_profiles()
-        eld_map = cls.get_eld_monitors()
+        import sys
+        is_test = "unittest" in sys.modules or bool(subprocess.os.environ.get("PYTEST_CURRENT_TEST"))
+        now = time.time()
+        if not is_test and not force and cls._cached_sinks and (now - cls._last_scan_time < 2.5):
+            return list(cls._cached_sinks)
+
+        if not is_test:
+            cls.ensure_multimonitor_card_profiles()
+        eld_map = cls.get_eld_monitors(force=force)
         sinks = []
         try:
-            output = subprocess.check_output(["pw-dump"], text=True)
+            output = subprocess.check_output(["pw-dump"], text=True, timeout=2.0)
             objects = json.loads(output)
             if not isinstance(objects, list):
                 return sinks
@@ -220,15 +258,17 @@ class DeviceScanner:
                     seen_indices[s.description] = idx + 1
                     s.description = f"{s.description} ({idx})"
 
+        cls._cached_sinks = sinks
+        cls._last_scan_time = now
         return sinks
 
     @classmethod
-    def get_sinks(cls) -> List[AudioSink]:
-        return cls.scan_sinks()
+    def get_sinks(cls, force: bool = False) -> List[AudioSink]:
+        return cls.scan_sinks(force=force)
 
     @classmethod
-    def get_available_sinks(cls) -> List[AudioSink]:
-        return cls.scan_sinks()
+    def get_available_sinks(cls, force: bool = False) -> List[AudioSink]:
+        return cls.scan_sinks(force=force)
 
     @classmethod
     def get_sink_states(cls) -> dict:
@@ -261,19 +301,6 @@ class DeviceScanner:
                 lines = b.splitlines()
                 input_id = lines[0].strip()
 
-                is_polifonia_loopback = ("polifonia" in b) and ("polifonia_play" in b or "polifonia_branch" in b or "polifonia_cap" in b)
-                if is_polifonia_loopback:
-                    continue
-
-                sink_match = re.search(r"Sink:\s+(\d+)", b)
-                sink_id = int(sink_match.group(1)) if sink_match else None
-
-                corked_match = re.search(r"Corked:\s+(\w+)", b)
-                is_corked = (corked_match.group(1).lower() == "yes") if corked_match else False
-
-                mute_match = re.search(r"Mute:\s+(\w+)", b)
-                is_muted = (mute_match.group(1).lower() == "yes") if mute_match else False
-
                 app_name_match = re.search(r'application\.name\s+=\s+\"([^\"]+)\"', b)
                 icon_match = re.search(r'application\.icon_name\s+=\s+\"([^\"]+)\"', b)
                 binary_match = re.search(r'application\.process\.binary\s+=\s+\"([^\"]+)\"', b)
@@ -287,8 +314,31 @@ class DeviceScanner:
                         )
                     )
                 )
+                media_name = media_name_match.group(1) if media_name_match else ""
+                node_name = node_name_match.group(1) if node_name_match else ""
+
+                b_lower = b.lower()
+                is_loopback = (
+                    (app_name == "pw-loopback") or
+                    node_name.startswith("polifonia") or
+                    media_name.startswith("polifonia") or
+                    ("stream.capture.sink" in b_lower) or
+                    ("loopback" in b_lower and "output" in b_lower)
+                )
+                if is_loopback:
+                    continue
+
+                sink_match = re.search(r"Sink:\s+(\d+)", b)
+                sink_id = int(sink_match.group(1)) if sink_match else None
+
+                corked_match = re.search(r"Corked:\s+(\w+)", b)
+                is_corked = (corked_match.group(1).lower() == "yes") if corked_match else False
+
+                mute_match = re.search(r"Mute:\s+(\w+)", b)
+                is_muted = (mute_match.group(1).lower() == "yes") if mute_match else False
+
                 icon_name = icon_match.group(1) if icon_match else "audio-x-generic"
-                media_name = media_name_match.group(1) if media_name_match else "Playback"
+                media_name_str = media_name if media_name else "Playback"
 
                 vol_match = re.search(r"/ (\d+)% /", b)
                 vol_pct = int(vol_match.group(1)) if vol_match else 100

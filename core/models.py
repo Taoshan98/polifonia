@@ -50,6 +50,13 @@ class SpeakerConfig:
     phase_inverted: bool = False
     hardware_latency_ms: float = 0.0
     bus_type: str = "other"
+    _acoustic_role: SpeakerRole = SpeakerRole.STEREO
+
+    @property
+    def effective_role(self) -> SpeakerRole:
+        if self.role in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
+            return getattr(self, "_acoustic_role", SpeakerRole.STEREO)
+        return self.role
 
     @property
     def id(self) -> int:
@@ -98,7 +105,7 @@ class SpeakerConfig:
         except ValueError:
             role = SpeakerRole.EXCLUDED
 
-        return SpeakerConfig(
+        cfg = SpeakerConfig(
             sink_id=int(d.get("sink_id", d.get("id", 0))),
             sink_name=str(d.get("sink_name", d.get("name", ""))),
             display_name=str(d.get("display_name", d.get("description", ""))),
@@ -111,6 +118,9 @@ class SpeakerConfig:
             hardware_latency_ms=float(d.get("hardware_latency_ms", 0.0)),
             bus_type=str(d.get("bus_type", "other"))
         )
+        if role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
+            cfg._acoustic_role = role
+        return cfg
 
 
 class CrossoverConfig:
