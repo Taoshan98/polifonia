@@ -99,6 +99,9 @@ class MainWindow(Adw.ApplicationWindow):
                 is_bt = (live.bus_type == "bluetooth") or ("bluez" in live.name.lower())
                 if is_bt and saved.volume_gain < 0.50:
                     saved.volume_gain = 0.85
+                if saved.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
+                    saved.role = SpeakerRole.STEREO
+                    saved._acoustic_role = SpeakerRole.STEREO
             else:
                 role = SpeakerRole.EXCLUDED if (live.is_internal or live.bus_type == "bluetooth") else SpeakerRole.STEREO
                 spk = SpeakerConfig(
@@ -109,6 +112,7 @@ class MainWindow(Adw.ApplicationWindow):
                     hardware_latency_ms=live.latency_ms,
                     bus_type=live.bus_type
                 )
+                spk._acoustic_role = SpeakerRole.STEREO
                 saved_channels_map[live.name] = spk
 
         self.config.channels = [
@@ -480,12 +484,14 @@ class MainWindow(Adw.ApplicationWindow):
         for ch in self.config.channels:
             if ch.sink_name == sink_name:
                 if enabled:
-                    ch.role = SpeakerRole.STEREO if ch.role in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED) else ch.role
+                    ch.role = SpeakerRole.STEREO
+                    ch._acoustic_role = SpeakerRole.STEREO
                     is_bt = (getattr(ch, "bus_type", "") == "bluetooth") or ("bluez" in ch.sink_name.lower())
                     min_gain = 0.50 if is_bt else 0.15
                     if ch.volume_gain < min_gain:
                         ch.volume_gain = 0.85 if is_bt else 1.0
                 else:
+                    ch._acoustic_role = SpeakerRole.STEREO
                     ch.role = SpeakerRole.EXCLUDED
                 break
         for card in self._speaker_cards:

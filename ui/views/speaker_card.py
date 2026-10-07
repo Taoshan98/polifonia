@@ -106,18 +106,19 @@ class SpeakerCard(Gtk.Box):
         vol_box.append(self.vol_badge)
         controls_row.append(vol_box)
 
-        # 2B. Selettore Ruolo
-        role_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        role_box.set_valign(Gtk.Align.CENTER)
-        role_box.set_size_request(140, -1)
+        # 2B. Selettore Ruolo (Nascosto su richiesta UI, default Stereo)
+        self.role_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.role_box.set_valign(Gtk.Align.CENTER)
+        self.role_box.set_visible(False)
 
         self.role_btn = Gtk.MenuButton()
         self.role_btn.add_css_class("flat")
         self.role_btn.add_css_class("role-pill")
         self.role_btn.set_halign(Gtk.Align.FILL)
+        self.role_btn.set_visible(False)
         self._setup_role_popover()
-        role_box.append(self.role_btn)
-        controls_row.append(role_box)
+        self.role_box.append(self.role_btn)
+        controls_row.append(self.role_box)
 
         # 2C. Sezione per la gestione del delay (senza la barra del delay!)
         delay_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -301,11 +302,8 @@ class SpeakerCard(Gtk.Box):
             return
         active = switch.get_active()
         if active:
-            if self.channel.role in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
-                restored_role = getattr(self.channel, "_acoustic_role", SpeakerRole.STEREO)
-                if restored_role in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
-                    restored_role = SpeakerRole.STEREO
-                self.channel.role = restored_role
+            self.channel.role = SpeakerRole.STEREO
+            self.channel._acoustic_role = SpeakerRole.STEREO
             self.channel.mute = False
             is_bt = (getattr(self.channel, "bus_type", "") == "bluetooth") or ("bluez" in self.channel.sink_name.lower())
             min_gain = 0.50 if is_bt else 0.15
@@ -321,8 +319,7 @@ class SpeakerCard(Gtk.Box):
                 if hasattr(self.audio_service, "set_speaker_mute"):
                     self.audio_service.set_speaker_mute(self.channel.sink_name, False)
         else:
-            if self.channel.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
-                self.channel._acoustic_role = self.channel.role
+            self.channel._acoustic_role = SpeakerRole.STEREO
             self.channel.role = SpeakerRole.EXCLUDED
             self.channel.mute = True
             if self.audio_service and hasattr(self.audio_service, "set_speaker_mute"):
