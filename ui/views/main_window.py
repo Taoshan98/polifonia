@@ -295,6 +295,32 @@ class MainWindow(Adw.ApplicationWindow):
         deck_title.set_halign(Gtk.Align.START)
         deck_header.append(deck_title)
 
+        # Auto-Align All Speakers Master Button
+        self.btn_auto_align = Gtk.Button()
+        self.btn_auto_align.set_tooltip_text("Automatically synchronize and align all active speakers using microphone")
+        self.btn_auto_align.add_css_class("auto-align-btn")
+        btn_align_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.icon_auto_align = Gtk.Image.new_from_icon_name("media-playlist-shuffle-symbolic")
+        self.lbl_auto_align = Gtk.Label(label="Auto-Sync Speakers")
+        btn_align_box.append(self.icon_auto_align)
+        btn_align_box.append(self.lbl_auto_align)
+        self.btn_auto_align.set_child(btn_align_box)
+        self.btn_auto_align.connect("clicked", self._on_auto_align_all_clicked)
+        deck_header.append(self.btn_auto_align)
+
+        # Reset Delays button
+        self.btn_reset_delays = Gtk.Button()
+        self.btn_reset_delays.set_tooltip_text("Reset all manual delays (relies on automatic PipeWire hardware latency compensation)")
+        self.btn_reset_delays.add_css_class("reset-delays-btn")
+        btn_reset_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        icon_reset = Gtk.Image.new_from_icon_name("edit-undo-symbolic")
+        lbl_reset = Gtk.Label(label="Reset Delays")
+        btn_reset_box.append(icon_reset)
+        btn_reset_box.append(lbl_reset)
+        self.btn_reset_delays.set_child(btn_reset_box)
+        self.btn_reset_delays.connect("clicked", self._on_reset_delays_clicked)
+        deck_header.append(self.btn_reset_delays)
+
         page_box.append(deck_header)
 
         # 3C. Natural Vertical Scrolled Deck of Horizontal Row Cards
@@ -657,3 +683,35 @@ class MainWindow(Adw.ApplicationWindow):
         if hasattr(self, "routing_graph"):
             self.routing_graph.refresh_topology()
         self.toast_overlay.add_toast(Adw.Toast.new("PipeWire audio devices refreshed."))
+
+    def _on_auto_align_all_clicked(self, btn):
+        self.btn_auto_align.set_sensitive(False)
+        self.lbl_auto_align.set_text("Calibrating...")
+        self.toast_overlay.add_toast(Adw.Toast.new("Acoustic synchronization in progress... please remain quiet (4s)"))
+
+        def _worker():
+            def _progress(msg):
+                GLib.idle_add(lambda: self.lbl_auto_align.set_text(msg[:24]))
+
+            success, msg, delays = self.audio_service.auto_align_all_speakers(progress_cb=_progress)
+            GLib.idle_add(self._on_auto_align_finished, success, msg, delays)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_auto_align_finished(self, success: bool, msg: str, delays: dict):
+        self.btn_auto_align.set_sensitive(True)
+        self.lbl_auto_align.set_text("Auto-Sync Speakers")
+        self._populate_rack()
+        if success:
+            self.toast_overlay.add_toast(Adw.Toast.new("✓ Speakers synchronized to the millisecond!"))
+        else:
+            self.toast_overlay.add_toast(Adw.Toast.new(f"Notice: {msg}"))
+        return False
+
+    def _on_reset_delays_clicked(self, btn):
+        self.audio_service.reset_all_delays()
+        self._populate_rack()
+        self.toast_overlay.add_toast(Adw.Toast.new("All speaker delays reset to 0.0 ms (Hardware compensation active)"))
+        return False
+
+

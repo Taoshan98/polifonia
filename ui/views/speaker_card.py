@@ -121,7 +121,7 @@ class SpeakerCard(Gtk.Box):
         self.role_box.append(self.role_btn)
         controls_row.append(self.role_box)
 
-        # 2C. Sezione per la gestione del delay (fino a 5000ms, input manuale e calibrazione)
+        # 2C. Delay controls section (up to 5000ms, manual entry and acoustic calibration)
         delay_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         delay_box.set_valign(Gtk.Align.CENTER)
         delay_box.set_size_request(300, -1)
@@ -131,13 +131,13 @@ class SpeakerCard(Gtk.Box):
         delay_box.append(delay_lbl)
 
         self.btn_delay_minus_10 = Gtk.Button(label="-10")
-        self.btn_delay_minus_10.set_tooltip_text("Diminuisci ritardo (-10 ms)")
+        self.btn_delay_minus_10.set_tooltip_text("Decrease delay (-10 ms)")
         self.btn_delay_minus_10.add_css_class("delay-btn")
         self.btn_delay_minus_10.connect("clicked", lambda b: self._step_delay(-10.0))
         delay_box.append(self.btn_delay_minus_10)
 
         self.btn_delay_minus = Gtk.Button(label="-2")
-        self.btn_delay_minus.set_tooltip_text("Regolazione fine (-2 ms)")
+        self.btn_delay_minus.set_tooltip_text("Fine adjust (-2 ms)")
         self.btn_delay_minus.add_css_class("delay-btn")
         self.btn_delay_minus.connect("clicked", lambda b: self._step_delay(-2.0))
         delay_box.append(self.btn_delay_minus)
@@ -145,50 +145,50 @@ class SpeakerCard(Gtk.Box):
         self.delay_badge = Gtk.Label()
         self.delay_badge.add_css_class("delay-badge")
         self.delay_badge.set_size_request(76, -1)
-        self.delay_badge.set_tooltip_text("Clicca per inserire il ritardo numericamente o calibrare")
+        self.delay_badge.set_tooltip_text("Click to enter numeric delay or calibrate")
         self.delay_badge.set_cursor_from_name("pointer")
         delay_box.append(self.delay_badge)
 
         self.btn_delay_plus = Gtk.Button(label="+2")
-        self.btn_delay_plus.set_tooltip_text("Regolazione fine (+2 ms)")
+        self.btn_delay_plus.set_tooltip_text("Fine adjust (+2 ms)")
         self.btn_delay_plus.add_css_class("delay-btn")
         self.btn_delay_plus.connect("clicked", lambda b: self._step_delay(+2.0))
         delay_box.append(self.btn_delay_plus)
 
         self.btn_delay_plus_10 = Gtk.Button(label="+10")
-        self.btn_delay_plus_10.set_tooltip_text("Aumenta ritardo (+10 ms)")
+        self.btn_delay_plus_10.set_tooltip_text("Increase delay (+10 ms)")
         self.btn_delay_plus_10.add_css_class("delay-btn")
         self.btn_delay_plus_10.connect("clicked", lambda b: self._step_delay(+10.0))
         delay_box.append(self.btn_delay_plus_10)
 
         self.btn_delay_zero = Gtk.Button(label="0")
-        self.btn_delay_zero.set_tooltip_text("Azzera ritardo (0 ms)")
+        self.btn_delay_zero.set_tooltip_text("Reset delay (0 ms)")
         self.btn_delay_zero.add_css_class("delay-reset-btn")
         self.btn_delay_zero.connect("clicked", lambda b: self._reset_delay())
         delay_box.append(self.btn_delay_zero)
 
         self.btn_delay_opts = Gtk.Button()
         self.btn_delay_opts.set_icon_name("document-edit-symbolic")
-        self.btn_delay_opts.set_tooltip_text("Imposta ritardo manuale o calibra con microfono")
+        self.btn_delay_opts.set_tooltip_text("Manual delay input or microphone calibration")
         self.btn_delay_opts.add_css_class("flat")
         self.btn_delay_opts.add_css_class("delay-opts-btn")
         delay_box.append(self.btn_delay_opts)
 
-        # Headless scale to preserve test compatibility (supporta da -5000ms a +5000ms)
+        # Headless scale to preserve test compatibility (supports -5000ms to +5000ms)
         self.delay_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -5000.0, 5000.0, 1.0)
         self.delay_scale.set_value(self.channel.delay_ms)
         self.delay_scale.connect("value-changed", self._on_delay_changed)
 
         self._setup_delay_popover()
 
-        # Click sul badge per aprire il popover di impostazione ritardo
+        # Click badge to open delay popover
         badge_click = Gtk.GestureClick()
         badge_click.connect("released", lambda g, n, x, y: self.delay_popover.popup())
         self.delay_badge.add_controller(badge_click)
 
         controls_row.append(delay_box)
 
-        # 2D. Pulsante di test
+        # 2D. Test button
         self.test_btn = Gtk.Button(label=" Test")
         self.test_btn.set_icon_name("audio-volume-high-symbolic")
         self.test_btn.add_css_class("flat")
@@ -198,7 +198,7 @@ class SpeakerCard(Gtk.Box):
         self.test_btn.connect("clicked", self._on_test_clicked)
         controls_row.append(self.test_btn)
 
-        # 2E. Toggle per on/off dispositivo
+        # 2E. Device enable toggle switch
         self.enable_switch = Gtk.Switch()
         self.enable_switch.set_valign(Gtk.Align.CENTER)
         self.enable_switch.connect("notify::active", self._on_enable_toggled)
@@ -425,7 +425,7 @@ class SpeakerCard(Gtk.Box):
         content.set_margin_end(12)
         content.set_size_request(280, -1)
 
-        pop_title = Gtk.Label(label="Imposta Ritardo & Calibrazione")
+        pop_title = Gtk.Label(label="Set Delay & Calibration")
         pop_title.add_css_class("heading")
         pop_title.set_halign(Gtk.Align.START)
         content.append(pop_title)
@@ -437,14 +437,14 @@ class SpeakerCard(Gtk.Box):
         hw_label.set_halign(Gtk.Align.START)
         content.append(hw_label)
 
-        # 1. Inserimento manuale
+        # 1. Manual delay entry
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        lbl_in = Gtk.Label(label="Ritardo (ms):")
+        lbl_in = Gtk.Label(label="Delay (ms):")
         lbl_in.set_halign(Gtk.Align.START)
         input_box.append(lbl_in)
 
         self.delay_num_entry = Gtk.Entry()
-        self.delay_num_entry.set_placeholder_text("es. -2300.0 oppure +150.0")
+        self.delay_num_entry.set_placeholder_text("e.g. -2300.0 or +150.0")
         self.delay_num_entry.set_hexpand(True)
         self.delay_num_entry.set_text(f"{self.channel.delay_ms:.1f}")
 
@@ -458,7 +458,7 @@ class SpeakerCard(Gtk.Box):
                 self.delay_num_entry.add_css_class("error")
 
         self.delay_num_entry.connect("activate", _on_apply_entry)
-        apply_btn = Gtk.Button(label="Applica")
+        apply_btn = Gtk.Button(label="Apply")
         apply_btn.add_css_class("suggested-action")
         apply_btn.connect("clicked", _on_apply_entry)
 
@@ -466,10 +466,10 @@ class SpeakerCard(Gtk.Box):
         input_box.append(apply_btn)
         content.append(input_box)
 
-        # Spiegazione ritardo
+        # Delay guide
         delay_tip = Gtk.Label(
-            label="💡 Negativo (es. -2300ms): rallenta tutti gli altri per allinearsi a questo dispositivo (Echo/Alexa/BT).\n"
-                  "💡 Positivo (es. +150ms): rallenta solo questo singolo altoparlante."
+            label="💡 Negative (e.g. -2300ms): delays all other speakers to align with this device (Echo/Alexa/BT).\n"
+                  "💡 Positive (e.g. +150ms): delays only this individual speaker."
         )
         delay_tip.add_css_class("dim-label")
         delay_tip.set_wrap(True)
@@ -477,8 +477,8 @@ class SpeakerCard(Gtk.Box):
         delay_tip.set_halign(Gtk.Align.START)
         content.append(delay_tip)
 
-        # 2. Preset rapidi
-        preset_lbl = Gtk.Label(label="Scelte Rapide:")
+        # 2. Quick Presets
+        preset_lbl = Gtk.Label(label="Quick Presets:")
         preset_lbl.add_css_class("dim-label")
         preset_lbl.set_halign(Gtk.Align.START)
         content.append(preset_lbl)
@@ -489,12 +489,12 @@ class SpeakerCard(Gtk.Box):
         preset_grid.set_halign(Gtk.Align.FILL)
 
         presets = [
-            ("0 ms (Azzera)", 0.0),
+            ("0 ms (Reset)", 0.0),
             ("-1710 ms (Amazon Echo Dot)", -1710.0),
             ("-2300 ms (Alexa / Echo max)", -2300.0),
-            ("-1000 ms (Rallenta altri 1s)", -1000.0),
-            ("-500 ms (Rallenta altri)", -500.0),
-            ("+150 ms (BT standard)", 150.0),
+            ("-1000 ms (Delay others 1s)", -1000.0),
+            ("-500 ms (Delay others 0.5s)", -500.0),
+            ("+150 ms (Standard BT)", 150.0),
         ]
         for idx, (lbl, p_val) in enumerate(presets):
             p_btn = Gtk.Button(label=lbl)
@@ -515,27 +515,27 @@ class SpeakerCard(Gtk.Box):
         # Separator
         content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # 3. Calibrazione Acustica Automatica
+        # 3. Automatic Acoustic Calibration
         calib_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
-        calib_title = Gtk.Label(label="Allineamento Acustico Automatico")
+        calib_title = Gtk.Label(label="Automatic Acoustic Calibration")
         calib_title.add_css_class("heading")
         calib_title.set_halign(Gtk.Align.START)
         calib_box.append(calib_title)
 
-        calib_desc = Gtk.Label(label="Emette impulsi acustici e misura con il microfono il ritardo esatto al millisecondo.")
+        calib_desc = Gtk.Label(label="Emits test audio chirps and measures physical delay with your microphone.")
         calib_desc.add_css_class("dim-label")
         calib_desc.set_wrap(True)
         calib_desc.set_max_width_chars(32)
         calib_desc.set_halign(Gtk.Align.START)
         calib_box.append(calib_desc)
 
-        self.btn_run_calib = Gtk.Button(label="🎙️ Avvia Calibrazione Acustica")
+        self.btn_run_calib = Gtk.Button(label="🎙️ Start Acoustic Calibration")
         self.btn_run_calib.add_css_class("suggested-action")
         self.btn_run_calib.connect("clicked", self._on_start_acoustic_calibration)
         calib_box.append(self.btn_run_calib)
 
-        # Box di stato / caricamento
+        # Status / Spinner box
         self.calib_status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.calib_status_box.set_visible(False)
         self.calib_spinner = Gtk.Spinner()
@@ -546,12 +546,12 @@ class SpeakerCard(Gtk.Box):
         self.calib_status_box.append(self.calib_status_lbl)
         calib_box.append(self.calib_status_box)
 
-        # Box risultato
+        # Result box
         self.calib_result_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.calib_result_box.set_visible(False)
         self.calib_result_lbl = Gtk.Label(label="")
         self.calib_result_lbl.add_css_class("accent-label")
-        self.btn_apply_calib = Gtk.Button(label="Applica")
+        self.btn_apply_calib = Gtk.Button(label="Apply")
         self.btn_apply_calib.add_css_class("suggested-action")
         self.calib_result_box.append(self.calib_result_lbl)
         self.calib_result_box.append(self.btn_apply_calib)
@@ -569,7 +569,7 @@ class SpeakerCard(Gtk.Box):
         self.calib_status_box.set_visible(True)
         self.calib_spinner.start()
         self.calib_result_box.set_visible(False)
-        self.calib_status_lbl.set_text("Preparazione segnali...")
+        self.calib_status_lbl.set_text("Preparing calibration signals...")
 
         def _progress(msg):
             GLib.idle_add(self.calib_status_lbl.set_text, msg)
@@ -584,22 +584,22 @@ class SpeakerCard(Gtk.Box):
                 self.btn_run_calib.set_sensitive(True)
                 if err or delay_res is None:
                     self.calib_status_box.set_visible(True)
-                    self.calib_status_lbl.set_text(f"⚠️ {err or 'Errore durante la calibrazione'}")
+                    self.calib_status_lbl.set_text(f"⚠️ {err or 'Error during calibration'}")
                 else:
                     self.calib_status_box.set_visible(False)
                     self.calib_result_box.set_visible(True)
                     if delay_res < 0:
                         self.calib_result_lbl.set_text(
-                            f"Dispositivo in ritardo: {abs(delay_res):.1f}ms\n"
-                            f"Compensazione: {delay_res:.1f}ms (rallenta gli altri altoparlanti)"
+                            f"Lagging device: {abs(delay_res):.1f}ms\n"
+                            f"Compensation: {delay_res:.1f}ms (delays other speakers)"
                         )
                     elif delay_res > 0:
                         self.calib_result_lbl.set_text(
-                            f"Dispositivo in anticipo: {delay_res:.1f}ms\n"
-                            f"Compensazione: +{delay_res:.1f}ms su questo altoparlante"
+                            f"Leading device: {delay_res:.1f}ms\n"
+                            f"Compensation: +{delay_res:.1f}ms on this speaker"
                         )
                     else:
-                        self.calib_result_lbl.set_text("Altoparlanti perfettamente sincronizzati (0.0ms)")
+                        self.calib_result_lbl.set_text("Speakers perfectly synchronized (0.0ms)")
 
                     def _apply_calib(b):
                         self.delay_num_entry.set_text(f"{delay_res:.1f}")

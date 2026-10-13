@@ -362,3 +362,41 @@ button.delay-opts-btn:hover {
     font-weight: 700;
 }
 
+button.auto-align-btn {
+    background: rgba(79, 107, 255, 0.16);
+    border: 1px solid rgba(79, 107, 255, 0.38);
+    border-radius: 8px;
+    color: #8da2fb;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+    transition: all 0.2s ease;
+}
+
+button.auto-align-btn:hover {
+    background: rgba(79, 107, 255, 0.32);
+    border-color: rgba(79, 107, 255, 0.65);
+    color: #ffffff;
+}
+
+button.auto-align-btn:disabled {
+    opacity: 0.5;
+}
+
+button.reset-delays-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 12px;
+    transition: all 0.2s ease;
+}
+
+button.reset-delays-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #f4f5f8;
+}
+

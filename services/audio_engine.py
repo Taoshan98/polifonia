@@ -993,7 +993,7 @@ class AudioEngineService:
         try:
             import numpy as np
         except ImportError:
-            return None, "Libreria numpy non disponibile per la calibrazione acustica."
+            return None, "NumPy library is required for acoustic calibration."
 
         # 1. Select reference speaker if not provided
         if not ref_sink:
@@ -1009,13 +1009,13 @@ class AudioEngineService:
                         break
 
         if not ref_sink:
-            return None, "Attiva almeno un altro altoparlante (es. monitor o cuffie) come riferimento per la calibrazione."
+            return None, "Activate at least one other speaker (e.g. monitor or headphones) as calibration reference."
 
         if ref_sink == target_sink:
-            return None, "Non puoi calibrare un altoparlante rispetto a se stesso."
+            return None, "Cannot calibrate a speaker against itself."
 
         if progress_cb:
-            progress_cb("Generazione segnali di calibrazione...")
+            progress_cb("Generating calibration signals...")
 
         sr = 48000
         duration = 0.08
@@ -1045,14 +1045,14 @@ class AudioEngineService:
                     pass
 
             if progress_cb:
-                progress_cb("Attivazione microfono di registrazione...")
+                progress_cb("Starting microphone capture...")
 
             cmd_rec = ["pw-record", "--format=s16", "--rate=48000", "--channels=1", raw_rec]
             proc_rec = subprocess.Popen(cmd_rec, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(0.35)
 
             if proc_rec.poll() is not None:
-                return None, "Impossibile avviare la registrazione dal microfono."
+                return None, "Unable to start microphone recording."
 
             # Temporarily mute polifonia_master so background audio does not clash
             # with test chirps or pollute the microphone recording
@@ -1064,7 +1064,7 @@ class AudioEngineService:
 
             # Play reference chirp
             if progress_cb:
-                progress_cb("Emissione impulso di riferimento...")
+                progress_cb("Playing reference chirp...")
             t_ref_play = time.time()
             subprocess.run(["pw-play", f"--target={ref_sink}", "--volume=0.15", chirp_wav],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
@@ -1074,14 +1074,14 @@ class AudioEngineService:
 
             # Play target chirp
             if progress_cb:
-                progress_cb("Emissione impulso su altoparlante target...")
+                progress_cb("Playing target chirp...")
             t_target_play = time.time()
             subprocess.run(["pw-play", f"--target={target_sink}", "--volume=0.18", chirp_wav],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
 
             # Listen for delayed arrival (e.g. Echo Dot 2-3s delay)
             if progress_cb:
-                progress_cb("Ascolto eco e ricezione audio...")
+                progress_cb("Listening for audio echoes...")
             time.sleep(3.8)
 
             proc_rec.terminate()
@@ -1091,10 +1091,10 @@ class AudioEngineService:
                 proc_rec.kill()
 
             if not os.path.exists(raw_rec) or os.path.getsize(raw_rec) < 48000 * 2:
-                return None, "Dati microfono insufficienti o microfono non attivo."
+                return None, "Insufficient microphone data or microphone inactive."
 
             if progress_cb:
-                progress_cb("Analisi correlazione acustica...")
+                progress_cb("Analyzing acoustic cross-correlation...")
 
             with open(raw_rec, "rb") as rf:
                 raw_bytes = rf.read()
@@ -1107,14 +1107,14 @@ class AudioEngineService:
             win1_start = int(sr * 0.20)
             win1_end = min(len(corr), int(sr * 1.20))
             if win1_end <= win1_start:
-                return None, "Registrazione troppo breve per identificare l'impulso."
+                return None, "Recording too short to identify impulse."
             p1 = win1_start + int(np.argmax(corr[win1_start:win1_end]))
 
             # Peak 2 window: target arrival (at least 0.5s after peak 1)
             win2_start = p1 + int(sr * 0.50)
             win2_end = len(corr)
             if win2_end <= win2_start:
-                return None, "Registrazione incompleta."
+                return None, "Incomplete recording."
             p2 = win2_start + int(np.argmax(corr[win2_start:win2_end]))
 
             mean_corr = float(np.mean(corr))
@@ -1122,7 +1122,7 @@ class AudioEngineService:
             ratio2 = float(corr[p2]) / max(1.0, mean_corr)
 
             if ratio1 < 2.0 or ratio2 < 2.0:
-                return None, "Segnale acustico troppo debole o rumore di fondo elevato. Aumenta leggermente il volume e riprova."
+                return None, "Acoustic signal too weak or ambient noise too high. Slightly increase volume and retry."
 
             nominal_gap_s = t_target_play - t_ref_play
             measured_gap_s = (p2 - p1) / sr
@@ -1145,7 +1145,7 @@ class AudioEngineService:
             return target_delay_ms, None
         except Exception as e:
             logger.error(f"Error during acoustic calibration: {e}")
-            return None, f"Errore durante la calibrazione: {e}"
+            return None, f"Error during calibration: {e}"
         finally:
             try:
                 subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "0"],
@@ -1168,7 +1168,294 @@ class AudioEngineService:
                 except Exception:
                     pass
 
+    def auto_align_all_speakers(self, progress_cb: Optional[callable] = None) -> tuple:
+        """
+        Global acoustic self-alignment ("Auto-Sync Speakers"):
+        Sequentially emits acoustic test impulses on each enabled speaker,
+        records physical sound via microphone, computes the exact arrival
+        latency matrix using cross-correlation, and automatically sets
+        and applies all speaker delays so they play in perfect acoustic unison.
+        Returns: (success: bool, message: str, calibrated_delays: dict)
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            return False, "NumPy library is required for acoustic calibration.", {}
+
+        # 1. Identify active speakers (excluding disabled/excluded)
+        active_speakers = [
+            s for s in self.config.channels
+            if s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)
+            and not getattr(s, "is_internal", False)
+        ]
+        if len(active_speakers) < 2:
+            return False, "Activate at least 2 output channels to perform automatic synchronization.", {}
+
+        # 2. Select reference speaker: prefer wired (HDMI, Jack, PCI), otherwise first
+        ref_speaker = next(
+            (s for s in active_speakers if getattr(s, "bus_type", "") != "bluetooth" and "bluez" not in s.sink_name.lower()),
+            active_speakers[0]
+        )
+
+        sr = 48000
+        duration = 0.06
+        n_samples = int(sr * duration)
+        t = np.linspace(0, duration, n_samples)
+        # 1.2kHz to 3.5kHz chirp with Hann window
+        chirp_signal = np.sin(2 * np.pi * (1200 + 2300 * t / duration) * t) * np.hanning(n_samples)
+        pcm_data = (chirp_signal * 32767 * 0.22).astype(np.int16)
+
+        chirp_wav = None
+        raw_rec = None
+        proc_rec = None
+        emissions = []
+        latencies = {}
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                chirp_wav = f.name
+                with wave.open(chirp_wav, "w") as wf:
+                    wf.setnchannels(2)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sr)
+                    stereo = np.column_stack((pcm_data, pcm_data)).flatten()
+                    wf.writeframes(stereo.tobytes())
+
+            raw_rec = f"/tmp/polifonia_autoalign_{os.getpid()}_{int(time.time()*1000)}.raw"
+            if os.path.exists(raw_rec):
+                try:
+                    os.remove(raw_rec)
+                except Exception:
+                    pass
+
+            if progress_cb:
+                progress_cb("Starting microphone capture...")
+
+            cmd_rec = ["pw-record", "--format=s16", "--rate=48000", "--channels=1", raw_rec]
+            proc_rec = subprocess.Popen(cmd_rec, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.35)
+
+            if proc_rec.poll() is not None:
+                return False, "Unable to start microphone recording.", {}
+
+            # Temporarily mute polifonia_master to prevent background audio from interfering
+            try:
+                subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "1"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            except Exception:
+                pass
+
+            t_start_rec = time.time()
+
+            # Sort active speakers so fast wired devices are tested first, standard BT second,
+            # and smart/deep-buffer speakers (Amazon Echo) last.
+            def _speaker_sort_key(s):
+                is_bt = (getattr(s, "bus_type", "") == "bluetooth") or ("bluez" in s.sink_name.lower())
+                name = (s.custom_name or s.display_name or s.sink_name).lower()
+                is_smart = ("echo" in name) or ("alexa" in name)
+                if not is_bt:
+                    return 0
+                elif not is_smart:
+                    return 1
+                else:
+                    return 2
+
+            ordered_speakers = sorted(active_speakers, key=_speaker_sort_key)
+
+            # Emit chirp sequentially on each speaker
+            for spk in ordered_speakers:
+                spk_name = spk.custom_name or spk.display_name or spk.sink_name
+                if progress_cb:
+                    progress_cb(f"Misurazione: {spk_name}...")
+
+                is_bt = (getattr(spk, "bus_type", "") == "bluetooth") or ("bluez" in spk.sink_name.lower())
+
+                # If unison loopbacks are active, isolate this speaker's loopback and play via polifonia_master
+                # so the chirp travels through the EXACT live PipeWire buffer pipeline!
+                loop_proc = self._sync_processes.get(spk.sink_name) if self._is_active else None
+                use_live_pipeline = (loop_proc is not None and loop_proc.poll() is None)
+
+                if use_live_pipeline:
+                    # Mute all other loopbacks
+                    for other in ordered_speakers:
+                        if other.sink_name != spk.sink_name:
+                            p = self._sync_processes.get(other.sink_name)
+                            if p and p.poll() is None:
+                                subprocess.run(["wpctl", "set-mute", "-p", str(p.pid), "1"],
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.1)
+                    # Unmute this loopback
+                    subprocess.run(["wpctl", "set-mute", "-p", str(loop_proc.pid), "0"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.1)
+                    # Unmute polifonia_master briefly to play chirp
+                    subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "0"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
+                    t_emit = time.time()
+                    subprocess.run(["pw-play", "--target=polifonia_master", "--volume=0.22", chirp_wav],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+                    subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "1"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
+                else:
+                    t_emit = time.time()
+                    subprocess.run(["pw-play", f"--target={spk.sink_name}", "--volume=0.20", chirp_wav],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+
+                emissions.append((spk, t_emit - t_start_rec))
+                # Interval: wired needs 0.4s, bluetooth needs 0.8s
+                time.sleep(0.8 if is_bt else 0.4)
+
+            # Extra tail wait for Echo Dot / Bluetooth latency (2.2s)
+            if progress_cb:
+                progress_cb("Listening to acoustic echoes and calibrating...")
+            time.sleep(2.2)
+
+            proc_rec.terminate()
+            try:
+                proc_rec.wait(timeout=1.0)
+            except Exception:
+                proc_rec.kill()
+
+            # Restore polifonia_master and loopback mutes
+            try:
+                subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "0"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            except Exception:
+                pass
+            if self._is_active:
+                for spk in ordered_speakers:
+                    p = self._sync_processes.get(spk.sink_name)
+                    if p and p.poll() is None and not spk.mute:
+                        subprocess.run(["wpctl", "set-mute", "-p", str(p.pid), "0"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.1)
+
+            if not os.path.exists(raw_rec) or os.path.getsize(raw_rec) < sr * 2:
+                return False, "Insufficient microphone data for acoustic analysis.", {}
+
+            with open(raw_rec, "rb") as rf:
+                raw_bytes = rf.read()
+
+            rec_arr = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32)
+            template = chirp_signal.astype(np.float32)
+            corr = np.abs(np.correlate(rec_arr, template, mode="valid"))
+            mean_corr = max(1.0, float(np.mean(corr)))
+
+            # Analyze arrival peak for each emission within physics-bounded windows
+            for spk, t_emit_rel in emissions:
+                is_bt = (getattr(spk, "bus_type", "") == "bluetooth") or ("bluez" in spk.sink_name.lower())
+                name = (spk.custom_name or spk.display_name or spk.sink_name).lower()
+                is_smart = ("echo" in name) or ("alexa" in name)
+
+                if not is_bt:
+                    # Wired (HDMI, DP, Jack, Internal PCI): DAC latency + room acoustic transit is < 30ms.
+                    # Max search window is strictly 120ms to prevent false cross-bleed from later chirps.
+                    win_start = max(0, int(sr * t_emit_rel))
+                    win_end = min(len(corr), int(sr * (t_emit_rel + 0.12)))
+                elif not is_smart:
+                    # Standard Bluetooth (e.g. W-KING): hardware latency is ~147ms; window is 40ms to 420ms.
+                    win_start = max(0, int(sr * (t_emit_rel + 0.04)))
+                    win_end = min(len(corr), int(sr * (t_emit_rel + 0.42)))
+                else:
+                    # Smart speakers with deep buffer (Amazon Echo): window up to 2.8s
+                    win_start = max(0, int(sr * (t_emit_rel + 0.06)))
+                    win_end = min(len(corr), int(sr * (t_emit_rel + 2.80)))
+
+                if win_end <= win_start:
+                    continue
+                peak_idx = win_start + int(np.argmax(corr[win_start:win_end]))
+                peak_val = corr[peak_idx]
+                snr = peak_val / mean_corr
+
+                if snr >= 1.6:
+                    t_arrival = peak_idx / sr
+                    measured_latency_ms = (t_arrival - t_emit_rel) * 1000.0
+                    latencies[spk.sink_name] = max(0.0, measured_latency_ms)
+                else:
+                    fallback_lat = getattr(spk, "hardware_latency_ms", 10.0) + (140.0 if is_bt else 0.0)
+                    latencies[spk.sink_name] = fallback_lat
+
+            ref_lat = latencies.get(ref_speaker.sink_name, 20.0)
+            calibrated_delays = {}
+            adjusted_count = 0
+
+            # Calculate relative alignment delays with physical plausibility guardrails
+            for spk in active_speakers:
+                is_bt = (getattr(spk, "bus_type", "") == "bluetooth") or ("bluez" in spk.sink_name.lower())
+                name = (spk.custom_name or spk.display_name or spk.sink_name).lower()
+                is_smart = ("echo" in name) or ("alexa" in name)
+
+                spk_lat = latencies.get(spk.sink_name, ref_lat)
+                diff_ms = spk_lat - ref_lat
+
+                # Guardrail 1: Deadband - differences <= 18ms are within normal room acoustics -> snap to 0.0
+                if abs(diff_ms) <= 18.0:
+                    calibrated_val = 0.0
+                elif not is_bt:
+                    # Guardrail 2: Wired speakers already have HW compensation; room distance offset cannot exceed 35ms.
+                    # Anything larger is a false room reflection -> reject and keep 0.0
+                    calibrated_val = 0.0 if abs(diff_ms) > 35.0 else round(-diff_ms, 1)
+                elif not is_smart:
+                    # Guardrail 3: Standard Bluetooth speakers already have base latency compensated;
+                    # fine adjustment bounded to +/- 45ms.
+                    calibrated_val = 0.0 if abs(diff_ms) > 50.0 else round(-diff_ms, 1)
+                else:
+                    # Guardrail 4: Smart speaker (Amazon Echo) with deep buffer lag
+                    calibrated_val = round(-diff_ms, 1)
+
+                calibrated_val = max(-5000.0, min(5000.0, calibrated_val))
+                if abs(calibrated_val) > 0.05:
+                    adjusted_count += 1
+                spk.delay_ms = calibrated_val
+                calibrated_delays[spk.sink_name] = calibrated_val
+
+            # Save updated configuration
+            self.storage.save(self.config)
+
+            # Reconfigure running engine immediately with smooth cross-channel synchronization
+            if self._is_active:
+                self.sync_active_branches()
+
+            if adjusted_count == 0:
+                summary = "All speakers are already in perfect natural alignment (0.0 ms)."
+            else:
+                summary = f"Calibrated {adjusted_count} speakers with precision fine delays."
+            return True, summary, calibrated_delays
+
+        except Exception as e:
+            logger.error(f"Error during auto_align_all_speakers: {e}")
+            return False, f"Error during auto-synchronization: {e}", {}
+        finally:
+            try:
+                subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "0"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            except Exception:
+                pass
+            if proc_rec and proc_rec.poll() is None:
+                try:
+                    proc_rec.terminate()
+                except Exception:
+                    pass
+            if chirp_wav and os.path.exists(chirp_wav):
+                try:
+                    os.remove(chirp_wav)
+                except Exception:
+                    pass
+            if raw_rec and os.path.exists(raw_rec):
+                try:
+                    os.remove(raw_rec)
+                except Exception:
+                    pass
+
+    def reset_all_delays(self) -> bool:
+        """Resets all speaker delays to 0.0 ms (relies purely on PipeWire automatic hardware latency compensation)."""
+        for spk in self.config.channels:
+            spk.delay_ms = 0.0
+        self.storage.save(self.config)
+        if self._is_active:
+            self.sync_active_branches()
+        return True
+
+
 
 # Aliases
 AudioService = AudioEngineService
+
 

@@ -780,7 +780,7 @@ class TestAudioEngine(unittest.TestCase):
         ]
         val, err = self.service.measure_acoustic_delay(target_sink="target_spk")
         self.assertIsNone(val)
-        self.assertIn("Attiva almeno un altro altoparlante", err)
+        self.assertIn("Activate at least one other speaker", err)
 
     def test_measure_acoustic_delay_target_same_as_ref_returns_error(self):
         """Verify calibration errors when target equals reference speaker."""
@@ -789,7 +789,7 @@ class TestAudioEngine(unittest.TestCase):
         ]
         val, err = self.service.measure_acoustic_delay(target_sink="spk1", ref_sink="spk1")
         self.assertIsNone(val)
-        self.assertIn("rispetto a se stesso", err)
+        self.assertIn("against itself", err)
 
     def test_measure_acoustic_delay_success(self):
         """Verify measure_acoustic_delay accurately calculates acoustic offset via cross correlation."""
@@ -869,9 +869,84 @@ class TestAudioEngine(unittest.TestCase):
             # Echo Dot has total_delay_ms = -2300 - (-2300) = 0ms
             self.assertAlmostEqual(self.service._running_delays["bluez_dot"], 0.0, delta=0.1)
 
+    def test_auto_align_all_speakers_insufficient_channels_returns_error(self):
+        """Verify auto_align_all_speakers returns error if fewer than 2 channels are active."""
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=1, sink_name="only_one", role=SpeakerRole.STEREO)
+        ]
+        success, msg, delays = self.service.auto_align_all_speakers()
+        self.assertFalse(success)
+        self.assertIn("at least 2", msg)
+        self.assertEqual(delays, {})
+
+    def test_auto_align_all_speakers_success_calibrates_matrix(self):
+        """Verify auto_align_all_speakers calculates and applies relative delays for active channels."""
+        import numpy as np
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=1, sink_name="wired_spk", display_name="BenQ Monitor",
+                          role=SpeakerRole.STEREO, delay_ms=0.0, hardware_latency_ms=10.0, bus_type="hdmi"),
+            SpeakerConfig(sink_id=2, sink_name="bt_echo", display_name="Echo Dot",
+                          role=SpeakerRole.STEREO, delay_ms=0.0, hardware_latency_ms=140.0, bus_type="bluetooth")
+        ]
+
+        # Synthesize a simulated microphone recording containing two chirp peaks
+        sr = 48000
+        total_len = sr * 4
+        sim_audio = np.random.normal(0, 100, total_len).astype(np.int16)
+
+        # Chirp template
+        duration = 0.06
+        n_samples = int(sr * duration)
+        t = np.linspace(0, duration, n_samples)
+        chirp = (np.sin(2 * np.pi * (1200 + 2300 * t / duration) * t) * np.hanning(n_samples) * 32767 * 0.22).astype(np.int16)
+
+        # Insert peak for wired speaker at sample 10000 (~0.2s)
+        sim_audio[10000:10000+len(chirp)] += chirp
+        # Insert peak for Echo Dot at sample 80000 (~1.66s, i.e. ~1.46s lag)
+        sim_audio[80000:80000+len(chirp)] += chirp
+
+        mock_proc_rec = MagicMock()
+        mock_proc_rec.poll.return_value = None
+        mock_proc_rec.wait.return_value = None
+
+        def _mock_popen(cmd, *args, **kwargs):
+            if isinstance(cmd, list) and cmd and cmd[0] == "pw-record":
+                raw_path = cmd[-1]
+                with open(raw_path, "wb") as f:
+                    f.write(sim_audio.tobytes())
+            return mock_proc_rec
+
+        with patch("subprocess.Popen", side_effect=_mock_popen), \
+             patch("subprocess.run"), \
+             patch("time.sleep"), \
+             patch.object(self.service, "sync_active_branches"):
+
+            success, msg, delays = self.service.auto_align_all_speakers()
+            self.assertTrue(success)
+            self.assertIn("wired_spk", delays)
+            self.assertIn("bt_echo", delays)
+            # The reference speaker (wired) should be at 0.0ms
+            self.assertEqual(delays["wired_spk"], 0.0)
+            # Echo dot should have a calculated negative offset relative to wired
+            self.assertTrue(delays["bt_echo"] <= 0.0)
+
+    def test_reset_all_delays(self):
+        """Verify reset_all_delays sets delay_ms to 0.0 for all channels and persists."""
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=1, sink_name="spk1", delay_ms=150.0),
+            SpeakerConfig(sink_id=2, sink_name="spk2", delay_ms=-500.0)
+        ]
+        with patch.object(self.service, "sync_active_branches"):
+            res = self.service.reset_all_delays()
+            self.assertTrue(res)
+            self.assertEqual(self.service.config.channels[0].delay_ms, 0.0)
+            self.assertEqual(self.service.config.channels[1].delay_ms, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
 
 
 
