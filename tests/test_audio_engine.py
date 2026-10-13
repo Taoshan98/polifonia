@@ -4,7 +4,7 @@ import unittest
 import tempfile
 import shutil
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 from pathlib import Path
 from core.models import SystemConfig, AudioSink, SpeakerConfig, SpeakerRole
 from storage.settings_store import StorageService
@@ -771,6 +771,103 @@ class TestAudioEngine(unittest.TestCase):
             self.assertEqual(len(load_calls), 1)
             cmd = load_calls[0]
             self.assertTrue(any("priority.driver=30000" in arg and "priority.session=30000" in arg for arg in cmd))
+
+
+    def test_measure_acoustic_delay_no_ref_speaker_returns_error(self):
+        """Verify calibration returns error when no reference speaker is available."""
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=1, sink_name="target_spk", role=SpeakerRole.STEREO)
+        ]
+        val, err = self.service.measure_acoustic_delay(target_sink="target_spk")
+        self.assertIsNone(val)
+        self.assertIn("Attiva almeno un altro altoparlante", err)
+
+    def test_measure_acoustic_delay_target_same_as_ref_returns_error(self):
+        """Verify calibration errors when target equals reference speaker."""
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=1, sink_name="spk1", role=SpeakerRole.STEREO)
+        ]
+        val, err = self.service.measure_acoustic_delay(target_sink="spk1", ref_sink="spk1")
+        self.assertIsNone(val)
+        self.assertIn("rispetto a se stesso", err)
+
+    def test_measure_acoustic_delay_success(self):
+        """Verify measure_acoustic_delay accurately calculates acoustic offset via cross correlation."""
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=1, sink_name="alsa_wired", display_name="Wired", role=SpeakerRole.STEREO, delay_ms=0.0),
+            SpeakerConfig(sink_id=2, sink_name="bluez_dot", display_name="Echo Dot", role=SpeakerRole.STEREO, delay_ms=0.0)
+        ]
+        import numpy as np
+
+        # Synthesize 5.5s recording where target peak arrives 2.2s after nominal interval
+        sr = 48000
+        duration = 0.08
+        n_samples = int(sr * duration)
+        t = np.linspace(0, duration, n_samples)
+        chirp = np.sin(2 * np.pi * (1000 + 1500 * t / duration) * t) * np.hanning(n_samples)
+
+        rec = np.zeros(int(sr * 5.5), dtype=np.float32)
+        idx1 = int(sr * 0.40)
+        idx2 = int(sr * (0.40 + 1.20 + 2.25)) # 2250ms delayed
+        rec[idx1:idx1+n_samples] += chirp * 0.8
+        rec[idx2:idx2+n_samples] += chirp * 0.7
+        raw_bytes = (rec * 32767).astype(np.int16).tobytes()
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+
+        with patch("subprocess.Popen", return_value=mock_proc), \
+             patch("subprocess.run") as mock_run, \
+             patch("builtins.open", mock_open(read_data=raw_bytes)), \
+             patch("os.path.exists", return_value=True), \
+             patch("os.path.getsize", return_value=len(raw_bytes)), \
+             patch("os.remove"):
+            val, err = self.service.measure_acoustic_delay(target_sink="bluez_dot", ref_sink="alsa_wired")
+            self.assertIsNone(err)
+            # Bluetooth target has physical latency + loopback graph follower buffer (2250ms + 880ms = 3130ms)
+            self.assertAlmostEqual(val, -3130.0, delta=5.0)
+
+            # For a wired target, no Bluetooth buffer is added -> exactly -2250ms
+            self.service.config.channels[1].sink_name = "alsa_aux"
+            self.service.config.channels[1].bus_type = "pci"
+            val_wired, err_wired = self.service.measure_acoustic_delay(target_sink="alsa_aux", ref_sink="alsa_wired")
+            self.assertIsNone(err_wired)
+            self.assertAlmostEqual(val_wired, -2250.0, delta=5.0)
+
+    def test_sync_active_branches_negative_delay_slows_wired(self):
+        """Verify negative delay on slow device (e.g. Echo Dot) restarts wired outputs with positive delay compensation."""
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=1, sink_name="alsa_wired", display_name="BenQ Monitor", role=SpeakerRole.STEREO, delay_ms=0.0),
+            SpeakerConfig(sink_id=2, sink_name="bluez_dot", display_name="Echo Dot", role=SpeakerRole.STEREO, delay_ms=0.0)
+        ]
+        def _make_mock_proc():
+            p = MagicMock()
+            p.poll = MagicMock(return_value=None)
+            p.terminate = MagicMock()
+            p.wait = MagicMock(return_value=0)
+            return p
+
+        with patch.object(self.service, "_ensure_master_sink", return_value=True), \
+             patch("subprocess.Popen", side_effect=[_make_mock_proc() for _ in range(10)]) as mock_popen, \
+             patch("subprocess.run"):
+
+            self.service.start_unison_sink()
+            wired_proc_1 = self.service._sync_processes["alsa_wired"]
+            self.assertEqual(self.service._running_user_min_delay, 0.0)
+
+            # User or calibration sets -2300ms on Echo Dot to compensate for 2.3s lag
+            self.service.config.channels[1].delay_ms = -2300.0
+            self.service.sync_active_branches()
+
+            # The wired speaker MUST have restarted with the new delay
+            wired_proc_1.terminate.assert_called()
+            self.assertEqual(self.service._running_user_min_delay, -2300.0)
+            self.assertIn("alsa_wired", self.service._sync_processes)
+            self.assertIn("bluez_dot", self.service._sync_processes)
+            # Wired speaker has total_delay_ms = 0 - (-2300) = 2300ms
+            self.assertAlmostEqual(self.service._running_delays["alsa_wired"], 2300.0, delta=0.1)
+            # Echo Dot has total_delay_ms = -2300 - (-2300) = 0ms
+            self.assertAlmostEqual(self.service._running_delays["bluez_dot"], 0.0, delta=0.1)
 
 
 if __name__ == "__main__":

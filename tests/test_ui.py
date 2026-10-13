@@ -295,6 +295,30 @@ class TestUI(unittest.TestCase):
         self.assertEqual(channel.delay_ms, 0.0)
         self.assertIn("0.0ms", card.delay_badge.get_text())
 
+        # Test setting large delay up to 5000ms (for Amazon Echo Dot / high latency devices)
+        card._set_manual_delay(2350.0)
+        self.assertEqual(channel.delay_ms, 2350.0)
+        self.assertIn("+2350.0ms", card.delay_badge.get_text())
+
+        # Clamping at 5000ms
+        card._step_delay(3000.0)
+        self.assertEqual(channel.delay_ms, 5000.0)
+        self.assertIn("+5000.0ms", card.delay_badge.get_text())
+
+        # Test setting negative manual delay down to -5000ms (to slow down other speakers for lagging Echo Dot)
+        card._set_manual_delay(-2300.0)
+        self.assertEqual(channel.delay_ms, -2300.0)
+        self.assertIn("-2300.0ms", card.delay_badge.get_text())
+
+        # Negative clamping at -5000ms
+        card._step_delay(-3000.0)
+        self.assertEqual(channel.delay_ms, -5000.0)
+        self.assertIn("-5000.0ms", card.delay_badge.get_text())
+
+        # Verify delay popover setup
+        self.assertIsNotNone(card.delay_popover)
+        self.assertIsNotNone(card.btn_delay_opts)
+
     def test_speaker_card_fast_volume_and_audible_enable(self):
         """Verify real-time non-blocking volume callback and auto audible volume reset on enable."""
         channel = SpeakerConfig(

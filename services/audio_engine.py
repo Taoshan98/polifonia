@@ -372,9 +372,17 @@ class AudioEngineService:
     def _route_active_streams_to_master(self):
         """Moves all existing external client application playback streams to polifonia_master seamlessly."""
         try:
+            live_sinks = self.scanner.get_sinks()
+            master_sink = next((s for s in live_sinks if s.name == "polifonia_master"), None)
+            master_id = master_sink.id if master_sink else None
+
             active_inputs = self.scanner.get_active_sink_inputs()
             for inp in active_inputs:
                 inp_id = inp.get("id")
+                inp_sink = inp.get("sink_id")
+                # Do not move if already connected to polifonia_master to avoid stream disconnection glitches
+                if master_id is not None and inp_sink == master_id:
+                    continue
                 if inp_id:
                     subprocess.run(["pactl", "move-sink-input", str(inp_id), "polifonia_master"],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
@@ -681,10 +689,10 @@ class AudioEngineService:
                 user_delay_changed = (last_user_delay is None) or (abs(last_user_delay - spk.delay_ms) > 0.05)
                 user_min_delay_changed = abs(self._running_user_min_delay - user_min_delay) > 0.05
 
-                # Terminate and restart ONLY if this specific speaker's role or user delay changed.
-                # Never restart healthy running wired streams when another device's delay changes,
-                # avoiding DisplayPort audio clock PLL jitter and follower resync noise on dual GPU outputs.
-                needs_restart = role_changed or user_delay_changed
+                # Terminate and restart if role changed, this speaker's user delay changed,
+                # or user_min_delay changed (which shifts the relative offset for all active speakers
+                # to slow them down and align with lagging Bluetooth/Echo devices).
+                needs_restart = role_changed or user_delay_changed or user_min_delay_changed
 
                 # Never interrupt or kill healthy, running streams unless role or user delay actually changed
                 if current_proc and not proc_dead and not needs_restart:
@@ -974,6 +982,191 @@ class AudioEngineService:
             "destinations": destinations,
             "max_hw_latency": max_hw_latency
         }
+
+    def measure_acoustic_delay(self, target_sink: str, ref_sink: Optional[str] = None,
+                               progress_cb: Optional[callable] = None) -> tuple:
+        """
+        Acoustically measures the physical/internal delay difference between a reference speaker
+        and the target speaker using microphone recording and cross-correlation analysis.
+        Returns (measured_delay_ms: Optional[float], error_message: Optional[str]).
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            return None, "Libreria numpy non disponibile per la calibrazione acustica."
+
+        # 1. Select reference speaker if not provided
+        if not ref_sink:
+            for spk in self.config.channels:
+                if spk.sink_name != target_sink and spk.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
+                    if getattr(spk, "bus_type", "") != "bluetooth":
+                        ref_sink = spk.sink_name
+                        break
+            if not ref_sink:
+                for spk in self.config.channels:
+                    if spk.sink_name != target_sink and spk.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
+                        ref_sink = spk.sink_name
+                        break
+
+        if not ref_sink:
+            return None, "Attiva almeno un altro altoparlante (es. monitor o cuffie) come riferimento per la calibrazione."
+
+        if ref_sink == target_sink:
+            return None, "Non puoi calibrare un altoparlante rispetto a se stesso."
+
+        if progress_cb:
+            progress_cb("Generazione segnali di calibrazione...")
+
+        sr = 48000
+        duration = 0.08
+        n_samples = int(sr * duration)
+        t = np.linspace(0, duration, n_samples)
+        chirp_signal = np.sin(2 * np.pi * (1000 + 1500 * t / duration) * t) * np.hanning(n_samples)
+        pcm_data = (chirp_signal * 32767 * 0.12).astype(np.int16)
+
+        chirp_wav = None
+        raw_rec = None
+        proc_rec = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                chirp_wav = f.name
+                with wave.open(chirp_wav, "w") as wf:
+                    wf.setnchannels(2)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sr)
+                    stereo = np.column_stack((pcm_data, pcm_data)).flatten()
+                    wf.writeframes(stereo.tobytes())
+
+            raw_rec = f"/tmp/polifonia_calib_{os.getpid()}_{int(time.time()*1000)}.raw"
+            if os.path.exists(raw_rec):
+                try:
+                    os.remove(raw_rec)
+                except Exception:
+                    pass
+
+            if progress_cb:
+                progress_cb("Attivazione microfono di registrazione...")
+
+            cmd_rec = ["pw-record", "--format=s16", "--rate=48000", "--channels=1", raw_rec]
+            proc_rec = subprocess.Popen(cmd_rec, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.35)
+
+            if proc_rec.poll() is not None:
+                return None, "Impossibile avviare la registrazione dal microfono."
+
+            # Temporarily mute polifonia_master so background audio does not clash
+            # with test chirps or pollute the microphone recording
+            try:
+                subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "1"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            except Exception:
+                pass
+
+            # Play reference chirp
+            if progress_cb:
+                progress_cb("Emissione impulso di riferimento...")
+            t_ref_play = time.time()
+            subprocess.run(["pw-play", f"--target={ref_sink}", "--volume=0.15", chirp_wav],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+
+            # Nominal interval between emissions
+            time.sleep(1.2)
+
+            # Play target chirp
+            if progress_cb:
+                progress_cb("Emissione impulso su altoparlante target...")
+            t_target_play = time.time()
+            subprocess.run(["pw-play", f"--target={target_sink}", "--volume=0.18", chirp_wav],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+
+            # Listen for delayed arrival (e.g. Echo Dot 2-3s delay)
+            if progress_cb:
+                progress_cb("Ascolto eco e ricezione audio...")
+            time.sleep(3.8)
+
+            proc_rec.terminate()
+            try:
+                proc_rec.wait(timeout=1.0)
+            except Exception:
+                proc_rec.kill()
+
+            if not os.path.exists(raw_rec) or os.path.getsize(raw_rec) < 48000 * 2:
+                return None, "Dati microfono insufficienti o microfono non attivo."
+
+            if progress_cb:
+                progress_cb("Analisi correlazione acustica...")
+
+            with open(raw_rec, "rb") as rf:
+                raw_bytes = rf.read()
+
+            rec_arr = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32)
+            template = chirp_signal.astype(np.float32)
+            corr = np.abs(np.correlate(rec_arr, template, mode="valid"))
+
+            # Peak 1 window: around reference arrival
+            win1_start = int(sr * 0.20)
+            win1_end = min(len(corr), int(sr * 1.20))
+            if win1_end <= win1_start:
+                return None, "Registrazione troppo breve per identificare l'impulso."
+            p1 = win1_start + int(np.argmax(corr[win1_start:win1_end]))
+
+            # Peak 2 window: target arrival (at least 0.5s after peak 1)
+            win2_start = p1 + int(sr * 0.50)
+            win2_end = len(corr)
+            if win2_end <= win2_start:
+                return None, "Registrazione incompleta."
+            p2 = win2_start + int(np.argmax(corr[win2_start:win2_end]))
+
+            mean_corr = float(np.mean(corr))
+            ratio1 = float(corr[p1]) / max(1.0, mean_corr)
+            ratio2 = float(corr[p2]) / max(1.0, mean_corr)
+
+            if ratio1 < 2.0 or ratio2 < 2.0:
+                return None, "Segnale acustico troppo debole o rumore di fondo elevato. Aumenta leggermente il volume e riprova."
+
+            nominal_gap_s = t_target_play - t_ref_play
+            measured_gap_s = (p2 - p1) / sr
+            delay_diff_ms = (measured_gap_s - nominal_gap_s) * 1000.0
+
+            # Target compensation:
+            # If target speaker is Bluetooth, add the continuous loopback graph buffer (~880ms)
+            # that PipeWire allocates for A2DP follower nodes to prevent buffer underruns during live streaming.
+            is_target_bt = ("bluez" in target_sink.lower()) or any(
+                getattr(s, "bus_type", "") == "bluetooth"
+                for s in self.config.channels if s.sink_name == target_sink
+            )
+            if is_target_bt and delay_diff_ms > 0:
+                delay_diff_ms += 880.0
+
+            ref_user_delay = next((s.delay_ms for s in self.config.channels if s.sink_name == ref_sink), 0.0)
+            target_delay_ms = round(ref_user_delay - delay_diff_ms, 1)
+            target_delay_ms = max(-5000.0, min(5000.0, target_delay_ms))
+
+            return target_delay_ms, None
+        except Exception as e:
+            logger.error(f"Error during acoustic calibration: {e}")
+            return None, f"Errore durante la calibrazione: {e}"
+        finally:
+            try:
+                subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "0"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            except Exception:
+                pass
+            if proc_rec and proc_rec.poll() is None:
+                try:
+                    proc_rec.terminate()
+                except Exception:
+                    pass
+            if chirp_wav and os.path.exists(chirp_wav):
+                try:
+                    os.remove(chirp_wav)
+                except Exception:
+                    pass
+            if raw_rec and os.path.exists(raw_rec):
+                try:
+                    os.remove(raw_rec)
+                except Exception:
+                    pass
 
 
 # Aliases

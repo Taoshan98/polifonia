@@ -339,3 +339,26 @@ scale slider {
     padding: 2px 7px;
     border-radius: 5px;
 }
+
+button.delay-opts-btn {
+    min-width: 26px;
+    min-height: 24px;
+    padding: 2px 4px;
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+button.delay-opts-btn:hover {
+    color: #f4f5f8;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.delay-badge:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.accent-label {
+    color: #4f6bff;
+    font-weight: 700;
+}
+
