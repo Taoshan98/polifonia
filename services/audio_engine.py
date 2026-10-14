@@ -1463,7 +1463,7 @@ class AudioEngineService:
             for spk in ordered_speakers:
                 spk_name = spk.custom_name or spk.display_name or spk.sink_name
                 if progress_cb:
-                    progress_cb(f"Misurazione: {spk_name}...")
+                    progress_cb(f"Measuring: {spk_name}...")
 
                 is_bt = (getattr(spk, "bus_type", "") in ("bluetooth", "network")) or ("bluez" in spk.sink_name.lower())
                 loop_proc = self._sync_processes.get(spk.sink_name) if use_live_pipeline else None

@@ -8,21 +8,22 @@
   
   <description>
     <p>
-      Polifonia is an advanced, PipeWire-native multi-speaker audio compositing
-      and acoustic DSP management system for Linux desktops.
+      Polifonia is an advanced, PipeWire-native multi-speaker audio compositing,
+      synchronization, and acoustic DSP management system for Linux desktops.
     </p>
     <p>
-      It enables workstations with heterogeneous multi-monitor setups (HDMI or DisplayPort
-      integrated screen speakers, USB audio DACs, auxiliary subwoofers, and analog outputs)
+      It enables workstations with heterogeneous audio setups (HDMI or DisplayPort
+      integrated screen speakers, USB audio DACs, S/PDIF optical receivers, Bluetooth A2DP
+      speakers, smart speakers, network/AirPlay sinks, and auxiliary subwoofers)
       to aggregate disparate physical outputs into a unified, phase-aligned, frequency-filtered
       multichannel virtual soundstage.
     </p>
     <p>Features:</p>
     <ul>
-      <li>Dynamic hardware discovery for multi-monitor displays, DACs, and auxiliary speakers</li>
-      <li>Sample-accurate delay compensation for acoustic distance delta and hardware buffer alignment</li>
-      <li>Active 2.1 acoustic crossover DSP with Linkwitz-Riley filters</li>
-      <li>Horizontal mixing console UI built with modern GTK4 and Libadwaita</li>
+      <li>Universal hardware discovery for HDMI/DP displays, USB DACs, S/PDIF, Bluetooth A2DP, and Network/AirPlay sinks</li>
+      <li>Two-level hardware-agnostic synchronization: real-time PipeWire SPA telemetry plus closed-loop microphone Auto-Sync using FFT Hilbert analytic cross-correlation</li>
+      <li>Active 4th-order Linkwitz-Riley (24 dB/oct) acoustic crossover DSP, audiophile resampling, and 180-degree phase inversion</li>
+      <li>Interactive Cairo live routing graph and studio mixing console UI built with GTK4 and Libadwaita</li>
       <li>System tray companion indicator for quick volume control and unison toggle</li>
     </ul>
   </description>
@@ -45,6 +46,11 @@
   </screenshots>
 
   <releases>
+    <release version="1.1.0" date="2026-10-14">
+      <description>
+        <p>Added hardware-agnostic closed-loop acoustic Auto-Sync (FFT Hilbert analytic cross-correlation and sub-sample parabolic interpolation), real-time PipeWire ProcessLatency telemetry, 4th-order Linkwitz-Riley crossover, 180-degree phase inversion, and S/PDIF and Network sink support.</p>
+      </description>
+    </release>
     <release version="1.0.6" date="2026-09-10">
       <description>
         <p>Standardized project naming to Polifonia, added AppStream metadata and Flathub distribution support.</p>
@@ -59,3 +65,4 @@
 
   <content_rating type="oars-1.1" />
 </component>
+
