@@ -125,6 +125,7 @@ class SpeakerCard(Gtk.Box):
         delay_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         delay_box.set_valign(Gtk.Align.CENTER)
         delay_box.set_size_request(300, -1)
+        self.delay_box = delay_box
 
         delay_lbl = Gtk.Label(label="Delay:")
         delay_lbl.add_css_class("dim-label")
@@ -259,29 +260,37 @@ class SpeakerCard(Gtk.Box):
 
     def _resolve_icon(self) -> str:
         name = (self.channel.display_name or self.channel.sink_name).lower()
-        if getattr(self.channel, "bus_type", "") == "bluetooth" or "bluetooth" in name or "bluez" in name:
+        bus = getattr(self.channel, "bus_type", "").lower()
+        if bus == "bluetooth" or "bluetooth" in name or "bluez" in name:
             return "audio-headphones-bluetooth"
-        elif "monitor" in name or "hdmi" in name or "displayport" in name:
+        elif bus == "network" or "airplay" in name or "raop" in name:
+            return "network-wireless-symbolic"
+        elif bus == "hdmi" or "monitor" in name or "hdmi" in name or "displayport" in name:
             return "video-display-symbolic"
+        elif bus == "usb" or "usb" in name or "dac" in name:
+            return "audio-card-analog-usb-symbolic"
         elif "speaker" in name or "laptop" in name or "internal" in name:
             return "audio-speakers-symbolic"
-        elif "usb" in name or "dac" in name:
-            return "audio-card-analog-usb-symbolic"
         elif "headphone" in name:
             return "audio-headphones-symbolic"
         return "audio-speakers-symbolic"
 
     def _resolve_connection_badge(self) -> str:
         name = (self.channel.display_name or self.channel.sink_name).lower()
-        if getattr(self.channel, "bus_type", "") == "bluetooth" or "bluetooth" in name or "bluez" in name:
+        bus = getattr(self.channel, "bus_type", "").lower()
+        if bus == "bluetooth" or "bluetooth" in name or "bluez" in name:
             return "BT"
+        elif bus == "network" or "airplay" in name or "raop" in name:
+            return "NET"
+        elif bus == "spdif" or "spdif" in name or "toslink" in name or "optical" in name:
+            return "SPDIF"
         elif "displayport" in name or "dp" in name:
             return "DP"
-        elif "hdmi" in name:
+        elif bus == "hdmi" or "hdmi" in name:
             return "HDMI"
-        elif "usb" in name:
+        elif bus == "usb" or "usb" in name:
             return "USB"
-        elif "pci" in name or "speaker" in name:
+        elif bus == "pci" or "pci" in name or "speaker" in name:
             return "PCI"
         return "OUT"
 
@@ -431,7 +440,11 @@ class SpeakerCard(Gtk.Box):
         content.append(pop_title)
 
         hw_name = self.channel.display_name or self.channel.sink_name
-        hw_label = Gtk.Label(label=f"Hardware: {self._short_name(hw_name)}")
+        hw_lat = getattr(self.channel, "hardware_latency_ms", 0.0)
+        hw_info = f"Hardware: {self._short_name(hw_name)}"
+        if hw_lat > 0.0:
+            hw_info += f" (HW buffer: {hw_lat:.0f} ms)"
+        hw_label = Gtk.Label(label=hw_info)
         hw_label.add_css_class("dim-label")
         hw_label.set_ellipsize(3)
         hw_label.set_halign(Gtk.Align.START)
@@ -465,6 +478,32 @@ class SpeakerCard(Gtk.Box):
         input_box.append(self.delay_num_entry)
         input_box.append(apply_btn)
         content.append(input_box)
+
+        # Phase / Polarity Inversion Row (180°)
+        phase_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        phase_lbl = Gtk.Label(label="Phase Invert (180° Ø):")
+        phase_lbl.set_tooltip_text("Invert acoustic polarity to fix bass/midrange cancellation between facing speakers")
+        phase_lbl.set_halign(Gtk.Align.START)
+        phase_lbl.set_hexpand(True)
+        phase_row.append(phase_lbl)
+
+        self.phase_switch = Gtk.Switch()
+        self.phase_switch.set_valign(Gtk.Align.CENTER)
+        self.phase_switch.set_active(bool(getattr(self.channel, "phase_inverted", False)))
+
+        def _on_phase_toggled(sw, _param):
+            if self._updating_ui:
+                return
+            inv = bool(sw.get_active())
+            self.channel.phase_inverted = inv
+            if self.audio_service and hasattr(self.audio_service, "set_speaker_phase"):
+                self.audio_service.set_speaker_phase(self.channel.sink_name, inv)
+            else:
+                self.on_change()
+
+        self.phase_switch.connect("notify::active", _on_phase_toggled)
+        phase_row.append(self.phase_switch)
+        content.append(phase_row)
 
         # Delay guide
         delay_tip = Gtk.Label(

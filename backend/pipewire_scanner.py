@@ -156,14 +156,34 @@ class DeviceScanner:
             raw_desc_lower = raw_desc.lower()
             name_lower = name.lower()
 
-            # Dynamic Classification
+            # Dynamic Classification across all hardware and network transport types
             is_internal = False
-            is_digital_hdmi = "hdmi" in name_lower or "pro-output" in name_lower or "iec958" in name_lower
+            api_lower = props.get("device.api", "").lower()
             is_bluetooth = (
                 bus == "bluetooth" or 
                 "bluez" in name_lower or 
-                "bluez" in props.get("device.api", "").lower() or
+                "bluez" in api_lower or
                 "bluetooth" in props.get("device.icon_name", "").lower()
+            )
+            is_network = (
+                bus == "network" or
+                any(k in name_lower or k in api_lower for k in ("raop", "airplay", "rtp", "roc", "snapcast", "cast", "tunnel"))
+            )
+            is_usb = (bus == "usb" or "usb" in name_lower)
+            is_digital_hdmi = (
+                not is_usb and (
+                    "hdmi" in name_lower or
+                    "displayport" in name_lower or
+                    "pro-output" in name_lower
+                )
+            )
+            is_spdif = (
+                not is_digital_hdmi and (
+                    "iec958" in name_lower or
+                    "spdif" in name_lower or
+                    "optical" in raw_desc_lower or
+                    "digital" in raw_desc_lower
+                )
             )
             bus_type = "other"
 
@@ -183,6 +203,16 @@ class DeviceScanner:
                 description = clean_name
                 bus_type = "bluetooth"
                 is_internal = False
+            elif is_network:
+                clean_name = (
+                    props.get("node.description") or
+                    props.get("device.description") or
+                    props.get("media.name") or
+                    raw_desc
+                ).strip()
+                description = f"Network Audio ({clean_name})" if "network" not in clean_name.lower() else clean_name
+                bus_type = "network"
+                is_internal = False
             elif is_digital_hdmi:
                 bus_type = "hdmi"
                 c_num = int(card_id) if card_id is not None else None
@@ -199,10 +229,14 @@ class DeviceScanner:
                 else:
                     # Unconnected HDMI/DP port on card without active ELD
                     continue
-            elif bus == "usb" or "usb" in name_lower:
+            elif is_usb:
                 clean_name = props.get("node.nick") or props.get("device.product.name") or raw_desc.replace("Analog Stereo", "").replace("Stereo analogico", "").strip()
                 description = f"USB Audio ({clean_name})"
                 bus_type = "usb"
+            elif is_spdif:
+                clean_name = props.get("node.nick") or props.get("device.product.name") or raw_desc.replace("Digital Stereo (IEC958)", "").strip() or "S/PDIF"
+                description = f"Digital S/PDIF ({clean_name})"
+                bus_type = "spdif"
             elif "headphone" in raw_desc_lower or "headphone" in name_lower:
                 clean_name = props.get("node.nick") or props.get("device.product.name") or "Analog"
                 description = f"Headphones / Audio Jack ({clean_name})"
@@ -215,22 +249,46 @@ class DeviceScanner:
                 description = raw_desc
                 bus_type = bus or "pci"
 
-            # Calculate hardware latency in ms
+            # Calculate hardware latency in ms from Latency and ProcessLatency SPA params
             latency_ms = 0.0
             params = obj.get("info", {}).get("params", {})
             for lat in params.get("Latency", []):
                 if isinstance(lat, dict):
                     min_ns = lat.get("minNs", 0)
+                    max_ns = lat.get("maxNs", 0)
                     if min_ns and min_ns > 0:
-                        latency_ms = max(latency_ms, min_ns / 1_000_000.0)
+                        if max_ns and min_ns <= max_ns <= 2_000_000_000 and (max_ns - min_ns) <= 200_000_000:
+                            est_ns = 0.5 * (min_ns + max_ns)
+                        else:
+                            est_ns = float(min_ns)
+                        latency_ms = max(latency_ms, est_ns / 1_000_000.0)
 
-            # Assign sensible default buffer latency if idle/unreported
+            if latency_ms <= 0.0:
+                for proc_lat in params.get("ProcessLatency", []):
+                    if isinstance(proc_lat, dict):
+                        ns_val = proc_lat.get("ns", 0)
+                        if ns_val and ns_val > 0:
+                            latency_ms = max(latency_ms, ns_val / 1_000_000.0)
+
+            # Assign sensible codec/bus-aware default buffer latency if idle/unreported
             if bus_type == "bluetooth" and latency_ms <= 0.0:
-                latency_ms = 180.0
-            elif bus_type in ("hdmi", "pci") and latency_ms <= 0.0:
+                bt_codec = props.get("api.bluez5.codec", "").lower()
+                if bt_codec in ("aptx_ll", "faststream", "lc3"):
+                    latency_ms = 65.0
+                elif bt_codec in ("aptx", "aptx_hd"):
+                    latency_ms = 130.0
+                elif bt_codec == "ldac":
+                    latency_ms = 170.0
+                else:
+                    latency_ms = 180.0
+            elif bus_type == "network" and latency_ms <= 0.0:
+                latency_ms = 250.0
+            elif bus_type in ("hdmi", "pci", "spdif") and latency_ms <= 0.0:
                 latency_ms = 10.0
             elif bus_type == "usb" and latency_ms <= 0.0:
                 latency_ms = 12.0
+            elif bus_type == "jack" and latency_ms <= 0.0:
+                latency_ms = 6.0
             elif bus_type == "internal" and latency_ms <= 0.0:
                 latency_ms = 5.0
 

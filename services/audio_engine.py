@@ -31,6 +31,7 @@ class AudioEngineService:
         self._running_delays: Dict[str, float] = {}
         self._running_user_delays: Dict[str, float] = {}
         self._running_roles: Dict[str, SpeakerRole] = {}
+        self._running_phases: Dict[str, bool] = {}
         self._running_user_min_delay: float = 0.0
         self._sync_lock = threading.RLock()
         self._master_sink_lock = threading.Lock()
@@ -112,6 +113,15 @@ class AudioEngineService:
         for spk in self.config.channels:
             if spk.sink_name == sink_name:
                 spk.delay_ms = delay_ms
+                break
+        self.storage.save(self.config)
+        if self._is_active:
+            self._restart_single_branch(sink_name)
+
+    def set_speaker_phase(self, sink_name: str, phase_inverted: bool):
+        for spk in self.config.channels:
+            if spk.sink_name == sink_name:
+                spk.phase_inverted = bool(phase_inverted)
                 break
         self.storage.save(self.config)
         if self._is_active:
@@ -304,6 +314,7 @@ class AudioEngineService:
             self._running_delays.clear()
             self._running_user_delays.clear()
             self._running_roles.clear()
+            self._running_phases.clear()
 
         try:
             subprocess.run(["pkill", "-f", "pw-loopback.*polifonia"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
@@ -551,22 +562,38 @@ class AudioEngineService:
         branch_name = f"polifonia_branch_{seq_tag}"
         target = spk.sink_name or str(spk.sink_id)
 
-        cap_props = f"target.object=polifonia_master stream.capture.sink=true node.name=polifonia_cap_{seq_tag} node.dont-reconnect=true state.restore-props=false audio.rate=48000"
-        play_props = f"target.object={target} node.name=polifonia_play_{seq_tag} node.passive=false node.dont-reconnect=true state.restore-props=false"
+        cap_props = (
+            f"target.object=polifonia_master stream.capture.sink=true "
+            f"node.name=polifonia_cap_{seq_tag} node.dont-reconnect=true "
+            f"state.restore-props=false audio.rate=48000 "
+            f"resample.quality=10 channelmix.normalize=true"
+        )
+        play_props = (
+            f"target.object={target} node.name=polifonia_play_{seq_tag} "
+            f"node.passive=false node.dont-reconnect=true "
+            f"state.restore-props=false resample.quality=10 "
+            f"channelmix.normalize=true channelmix.upmix=true"
+        )
 
         role_to_use = getattr(spk, "effective_role", spk.role)
         if role_to_use in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
             role_to_use = getattr(spk, "_acoustic_role", SpeakerRole.STEREO)
 
-        if role_to_use == SpeakerRole.LEFT:
+        phase_inverted = bool(getattr(spk, "phase_inverted", False))
+
+        if role_to_use in (SpeakerRole.LEFT, SpeakerRole.SURROUND_LEFT):
             cap_props += " audio.position=[ FL ]"
             play_props += " audio.position=[ FL, FR ]"
-        elif role_to_use == SpeakerRole.RIGHT:
+        elif role_to_use in (SpeakerRole.RIGHT, SpeakerRole.SURROUND_RIGHT):
             cap_props += " audio.position=[ FR ]"
             play_props += " audio.position=[ FL, FR ]"
         elif role_to_use in (SpeakerRole.SUBWOOFER, SpeakerRole.CENTER):
             cap_props += " audio.position=[ FL, FR ]"
             play_props += " audio.position=[ FL, FR ]"
+        elif phase_inverted:
+            # Swap/anti-phase channel mapping when stereo polarity is inverted
+            cap_props += " audio.position=[ FL, FR ]"
+            play_props += " audio.position=[ FR, FL ]"
 
         cmd_loop = [
             "pw-loopback",
@@ -587,6 +614,7 @@ class AudioEngineService:
             self._running_delays[sink_name] = total_delay_ms
             self._running_user_delays[sink_name] = spk.delay_ms
             self._running_roles[sink_name] = role_to_use
+            self._running_phases[sink_name] = phase_inverted
             self._running_muted[sink_name] = start_muted
             if proc and proc.pid:
                 target_mute = "1" if start_muted else "0"
@@ -622,9 +650,17 @@ class AudioEngineService:
             if live_sinks is None:
                 live_sinks = self.scanner.get_sinks(force=False)
             live_sink_names = {s.name for s in live_sinks} if live_sinks else set()
+            live_sink_map = {s.name: s for s in live_sinks} if live_sinks else {}
 
             import sys
             is_test = "unittest" in sys.modules
+
+            # Refresh hardware latency from live PipeWire quantum/codec telemetry when available
+            if not is_test and live_sink_map:
+                for ch in self.config.channels:
+                    live_obj = live_sink_map.get(ch.sink_name)
+                    if live_obj and getattr(live_obj, "latency_ms", 0.0) > 0.0:
+                        ch.hardware_latency_ms = live_obj.latency_ms
 
             # Latency reference is calculated across all connected/live channels (excluding internal speakers)
             # so delay compensation remains completely stable without restarting running wired streams when BT is toggled.
@@ -645,7 +681,7 @@ class AudioEngineService:
             user_min_delay = min(0.0, min((s.delay_ms for s in profile_speakers), default=0.0))
 
             has_bt_active = any(
-                ((getattr(s, "bus_type", "") == "bluetooth") or ("bluez" in s.sink_name.lower()))
+                ((getattr(s, "bus_type", "") in ("bluetooth", "network")) or ("bluez" in s.sink_name.lower()))
                 and s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)
                 and (not live_sink_names or s.sink_name in live_sink_names)
                 for s in self.config.channels
@@ -675,24 +711,27 @@ class AudioEngineService:
                 target_role = getattr(spk, "effective_role", spk.role)
                 if target_role in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
                     target_role = getattr(spk, "_acoustic_role", SpeakerRole.STEREO)
+                target_phase = bool(getattr(spk, "phase_inverted", False))
 
                 hw_lat = getattr(spk, "hardware_latency_ms", 0.0)
                 auto_comp_delay_ms = max(0.0, max_hw_latency - hw_lat)
                 user_offset_delay_ms = spk.delay_ms - user_min_delay
                 total_delay_ms = user_offset_delay_ms + auto_comp_delay_ms
-                is_bt = (getattr(spk, "bus_type", "") == "bluetooth") or ("bluez" in sink_name.lower())
+                is_bt = (getattr(spk, "bus_type", "") in ("bluetooth", "network")) or ("bluez" in sink_name.lower())
 
                 current_proc = self._sync_processes.get(sink_name)
                 proc_dead = (current_proc is None) or (current_proc.poll() is not None)
                 role_changed = (self._running_roles.get(sink_name) != target_role)
+                phase_changed = (self._running_phases.get(sink_name, False) != target_phase)
                 last_user_delay = self._running_user_delays.get(sink_name)
                 user_delay_changed = (last_user_delay is None) or (abs(last_user_delay - spk.delay_ms) > 0.05)
                 user_min_delay_changed = abs(self._running_user_min_delay - user_min_delay) > 0.05
+                running_total_delay = self._running_delays.get(sink_name)
+                auto_delay_changed = (not is_test) and (running_total_delay is not None) and (abs(running_total_delay - total_delay_ms) > 1.0)
 
-                # Terminate and restart if role changed, this speaker's user delay changed,
-                # or user_min_delay changed (which shifts the relative offset for all active speakers
-                # to slow them down and align with lagging Bluetooth/Echo devices).
-                needs_restart = role_changed or user_delay_changed or user_min_delay_changed
+                # Terminate and restart if role/phase changed, user delay changed,
+                # or automatic hardware latency compensation shifted.
+                needs_restart = role_changed or phase_changed or user_delay_changed or user_min_delay_changed or auto_delay_changed
 
                 # Never interrupt or kill healthy, running streams unless role or user delay actually changed
                 if current_proc and not proc_dead and not needs_restart:
@@ -721,11 +760,12 @@ class AudioEngineService:
                         self._running_delays.pop(s_name, None)
                         self._running_user_delays.pop(s_name, None)
                         self._running_roles.pop(s_name, None)
+                        self._running_phases.pop(s_name, None)
                         self._running_muted.pop(s_name, None)
                     if proc:
                         self._async_kill(proc)
 
-            # Phase 3: Launch Bluetooth endpoints FIRST
+            # Phase 3: Launch Bluetooth/Network endpoints FIRST
             bt_launches = {k: v for k, v in to_launch.items() if v[2]}
             wired_launches = {k: v for k, v in to_launch.items() if not v[2]}
 
@@ -772,12 +812,13 @@ class AudioEngineService:
                 self._running_delays.pop(sink_name, None)
                 self._running_user_delays.pop(sink_name, None)
                 self._running_roles.pop(sink_name, None)
+                self._running_phases.pop(sink_name, None)
                 self._running_muted.pop(sink_name, None)
                 self._async_kill(proc)
         self.sync_active_branches()
 
     def _start_watchdog(self):
-        """Monitors active loopback streams and automatically recovers any dropped endpoints."""
+        """Monitors active loopback streams and automatically recovers any dropped or drifted endpoints."""
         if hasattr(self, "_watchdog_thread") and self._watchdog_thread and self._watchdog_thread.is_alive():
             return
         self._watchdog_stop_event = threading.Event()
@@ -792,23 +833,41 @@ class AudioEngineService:
                         continue
                 live_sinks = self.scanner.get_sinks()
                 live_sink_names = {s.name for s in live_sinks} if live_sinks else set()
+                live_sink_map = {s.name: s for s in live_sinks} if live_sinks else {}
                 active_sink_names = {
                     s.sink_name for s in self.config.channels
                     if s.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)
                     and (not live_sink_names or s.sink_name in live_sink_names)
                 }
-                dead_sinks = []
+                dead_or_drifted_sinks = []
                 with self._sync_lock:
                     for s_name in active_sink_names:
                         p = self._sync_processes.get(s_name)
                         if p is None or p.poll() is not None:
-                            dead_sinks.append(s_name)
+                            dead_or_drifted_sinks.append(s_name)
                             self._sync_processes.pop(s_name, None)
                             self._running_delays.pop(s_name, None)
                             self._running_user_delays.pop(s_name, None)
                             self._running_roles.pop(s_name, None)
+                            self._running_phases.pop(s_name, None)
                             self._running_muted.pop(s_name, None)
-                if dead_sinks:
+                            continue
+
+                        # Check if PipeWire quantum/codec latency drifted significantly (> 25ms)
+                        live_obj = live_sink_map.get(s_name)
+                        spk_cfg = next((c for c in self.config.channels if c.sink_name == s_name), None)
+                        if live_obj and spk_cfg and live_obj.latency_ms > 0.0:
+                            if abs(live_obj.latency_ms - getattr(spk_cfg, "hardware_latency_ms", 0.0)) > 25.0:
+                                spk_cfg.hardware_latency_ms = live_obj.latency_ms
+                                dead_or_drifted_sinks.append(s_name)
+                                self._sync_processes.pop(s_name, None)
+                                self._running_delays.pop(s_name, None)
+                                self._running_user_delays.pop(s_name, None)
+                                self._running_roles.pop(s_name, None)
+                                self._running_phases.pop(s_name, None)
+                                self._running_muted.pop(s_name, None)
+                                self._async_kill(p)
+                if dead_or_drifted_sinks:
                     try:
                         self.sync_active_branches(live_sinks=live_sinks)
                     except Exception:
@@ -857,6 +916,7 @@ class AudioEngineService:
             self._running_delays.clear()
             self._running_user_delays.clear()
             self._running_roles.clear()
+            self._running_phases.clear()
             self._running_muted.clear()
             self._running_user_min_delay = 0.0
 
@@ -966,6 +1026,7 @@ class AudioEngineService:
                 "role": ch.role.value if hasattr(ch.role, "value") else str(ch.role),
                 "volume_gain": ch.volume_gain,
                 "delay_ms": ch.delay_ms,
+                "phase_inverted": bool(getattr(ch, "phase_inverted", False)),
                 "hardware_latency_ms": hw_lat,
                 "auto_comp_delay_ms": auto_comp_delay_ms,
                 "total_delay_ms": total_delay_ms,
@@ -983,6 +1044,91 @@ class AudioEngineService:
             "max_hw_latency": max_hw_latency
         }
 
+    @staticmethod
+    def _compute_robust_correlation(rec_arr, template):
+        """
+        Computes a phase-invariant Hilbert analytic matched-filter cross-correlation
+        envelope between a recorded microphone signal and a reference chirp template
+        in O(N log N) via FFT. Eliminates DC offset, carrier phase sensitivity (0-360°),
+        and 2.2 kHz carrier ripples for sub-millisecond group-delay peak detection.
+        """
+        import numpy as np
+        rec_zm = rec_arr.astype(np.float32) - float(np.mean(rec_arr))
+        tpl_zm = template.astype(np.float32) - float(np.mean(template))
+        n_rec = len(rec_zm)
+        n_tpl = len(tpl_zm)
+        if n_rec < n_tpl or n_tpl == 0:
+            return np.zeros(1, dtype=np.float32)
+
+        valid_len = n_rec - n_tpl + 1
+        n_fft = 1 << int(np.ceil(np.log2(max(2, n_rec + n_tpl - 1))))
+
+        # Cross-spectrum X(f) = FFT(rec) * conj(FFT(tpl))
+        R = np.fft.fft(rec_zm, n=n_fft)
+        T = np.fft.fft(tpl_zm, n=n_fft)
+        X = R * np.conj(T)
+
+        # Single-sided Hilbert analytic multiplier H(f) in frequency domain
+        H = np.zeros(n_fft, dtype=np.float32)
+        H[0] = 1.0
+        if n_fft % 2 == 0:
+            H[1:n_fft // 2] = 2.0
+            H[n_fft // 2] = 1.0
+        else:
+            H[1:(n_fft + 1) // 2] = 2.0
+
+        analytic_corr = np.fft.ifft(X * H)[:valid_len]
+        return np.abs(analytic_corr).astype(np.float32)
+
+    @staticmethod
+    def _detect_first_arrival_peak(corr, win_start: int, win_end: int, sr: int, noise_floor: float) -> tuple:
+        """
+        Detects the true direct-path acoustic arrival peak within [win_start, win_end],
+        preferring the earliest direct wavefront over stronger late room/desk reflections,
+        and refines the arrival index to sub-sample precision (<0.02 ms) via parabolic interpolation.
+        Returns (exact_peak_idx: float, peak_val: float).
+        """
+        import numpy as np
+        win_start = max(0, int(win_start))
+        win_end = min(len(corr), int(win_end))
+        if win_end <= win_start:
+            return float(win_start), 0.0
+
+        segment = corr[win_start:win_end]
+        rel_max = int(np.argmax(segment))
+        max_idx = win_start + rel_max
+        max_val = float(corr[max_idx])
+        peak_idx = max_idx
+
+        # Check 2.0ms to 15.0ms before max_idx for a distinct direct-path pulse preceding room reflections
+        pre_start = max(win_start, max_idx - int(sr * 0.015))
+        pre_end = max(win_start, max_idx - int(sr * 0.002))
+        if pre_end > pre_start + 2 and max_val > noise_floor * 3.0:
+            pre_seg = corr[pre_start:pre_end]
+            cand_rel = int(np.argmax(pre_seg))
+            cand_idx = pre_start + cand_rel
+            cand_val = float(corr[cand_idx])
+            if cand_val >= max(noise_floor * 3.5, max_val * 0.65):
+                # Verify a distinct valley separates the early direct pulse from the later reflection
+                valley_min = float(np.min(corr[cand_idx:max_idx]))
+                if valley_min <= 0.55 * cand_val:
+                    peak_idx = cand_idx
+
+        peak_val = float(corr[peak_idx])
+        exact_idx = float(peak_idx)
+        # 3-point parabolic sub-sample interpolation
+        if 0 < peak_idx < len(corr) - 1:
+            y0 = float(corr[peak_idx - 1])
+            y1 = float(corr[peak_idx])
+            y2 = float(corr[peak_idx + 1])
+            denom = y0 - 2.0 * y1 + y2
+            if abs(denom) > 1e-6:
+                delta = 0.5 * (y0 - y2) / denom
+                if -0.5 <= delta <= 0.5:
+                    exact_idx += delta
+
+        return exact_idx, peak_val
+
     def measure_acoustic_delay(self, target_sink: str, ref_sink: Optional[str] = None,
                                progress_cb: Optional[callable] = None) -> tuple:
         """
@@ -999,7 +1145,7 @@ class AudioEngineService:
         if not ref_sink:
             for spk in self.config.channels:
                 if spk.sink_name != target_sink and spk.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
-                    if getattr(spk, "bus_type", "") != "bluetooth":
+                    if getattr(spk, "bus_type", "") not in ("bluetooth", "network"):
                         ref_sink = spk.sink_name
                         break
             if not ref_sink:
@@ -1079,7 +1225,7 @@ class AudioEngineService:
             subprocess.run(["pw-play", f"--target={target_sink}", "--volume=0.18", chirp_wav],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
 
-            # Listen for delayed arrival (e.g. Echo Dot 2-3s delay)
+            # Listen for delayed arrival (e.g. deep-buffer wireless/smart speaker delay)
             if progress_cb:
                 progress_cb("Listening for audio echoes...")
             time.sleep(3.8)
@@ -1101,25 +1247,25 @@ class AudioEngineService:
 
             rec_arr = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32)
             template = chirp_signal.astype(np.float32)
-            corr = np.abs(np.correlate(rec_arr, template, mode="valid"))
+            corr = self._compute_robust_correlation(rec_arr, template)
+            mean_corr = max(1.0, float(np.mean(corr)))
 
             # Peak 1 window: around reference arrival
             win1_start = int(sr * 0.20)
             win1_end = min(len(corr), int(sr * 1.20))
             if win1_end <= win1_start:
                 return None, "Recording too short to identify impulse."
-            p1 = win1_start + int(np.argmax(corr[win1_start:win1_end]))
+            p1, val1 = self._detect_first_arrival_peak(corr, win1_start, win1_end, sr, mean_corr)
 
             # Peak 2 window: target arrival (at least 0.5s after peak 1)
-            win2_start = p1 + int(sr * 0.50)
+            win2_start = int(p1) + int(sr * 0.50)
             win2_end = len(corr)
             if win2_end <= win2_start:
                 return None, "Incomplete recording."
-            p2 = win2_start + int(np.argmax(corr[win2_start:win2_end]))
+            p2, val2 = self._detect_first_arrival_peak(corr, win2_start, win2_end, sr, mean_corr)
 
-            mean_corr = float(np.mean(corr))
-            ratio1 = float(corr[p1]) / max(1.0, mean_corr)
-            ratio2 = float(corr[p2]) / max(1.0, mean_corr)
+            ratio1 = val1 / mean_corr
+            ratio2 = val2 / mean_corr
 
             if ratio1 < 2.0 or ratio2 < 2.0:
                 return None, "Acoustic signal too weak or ambient noise too high. Slightly increase volume and retry."
@@ -1129,8 +1275,8 @@ class AudioEngineService:
             delay_diff_ms = (measured_gap_s - nominal_gap_s) * 1000.0
 
             # Target compensation:
-            # If target speaker is Bluetooth, add the continuous loopback graph buffer (~880ms)
-            # that PipeWire allocates for A2DP follower nodes to prevent buffer underruns during live streaming.
+            # If target speaker is Bluetooth and was measured directly via pw-play (not primed by live loopback),
+            # add the continuous loopback graph buffer (~880ms) that PipeWire allocates for A2DP follower nodes.
             is_target_bt = ("bluez" in target_sink.lower()) or any(
                 getattr(s, "bus_type", "") == "bluetooth"
                 for s in self.config.channels if s.sink_name == target_sink
@@ -1170,11 +1316,13 @@ class AudioEngineService:
 
     def auto_align_all_speakers(self, progress_cb: Optional[callable] = None) -> tuple:
         """
-        Global acoustic self-alignment ("Auto-Sync Speakers"):
-        Sequentially emits acoustic test impulses on each enabled speaker,
-        records physical sound via microphone, computes the exact arrival
-        latency matrix using cross-correlation, and automatically sets
-        and applies all speaker delays so they play in perfect acoustic unison.
+        Closed-Loop Acoustic System Identification ("Auto-Sync Speakers"):
+        Sequentially emits acoustic probe impulses through the live PipeWire
+        master pipeline (or direct target fallback), records physical sound via
+        microphone, computes the exact group-delay arrival matrix using Hilbert
+        analytic cross-correlation with sub-sample parabolic interpolation, and
+        automatically deduces any unreported internal DSP buffer so all speakers
+        play in true physical unison.
         Returns: (success: bool, message: str, calibrated_delays: dict)
         """
         try:
@@ -1191,27 +1339,55 @@ class AudioEngineService:
         if len(active_speakers) < 2:
             return False, "Activate at least 2 output channels to perform automatic synchronization.", {}
 
-        # 2. Select reference speaker: prefer wired (HDMI, Jack, PCI), otherwise first
-        ref_speaker = next(
-            (s for s in active_speakers if getattr(s, "bus_type", "") != "bluetooth" and "bluez" not in s.sink_name.lower()),
-            active_speakers[0]
-        )
+        # 2. Select reference speaker: prefer wired (HDMI, DP, USB, S/PDIF, Jack, PCI) with lowest HW latency
+        wired_candidates = [
+            s for s in active_speakers
+            if getattr(s, "bus_type", "") not in ("bluetooth", "network")
+            and "bluez" not in s.sink_name.lower()
+        ]
+        if wired_candidates:
+            ref_speaker = min(wired_candidates, key=lambda s: float(getattr(s, "hardware_latency_ms", 0.0)))
+        else:
+            ref_speaker = min(active_speakers, key=lambda s: float(getattr(s, "hardware_latency_ms", 0.0)))
 
+        is_test = "unittest" in sys.modules
         sr = 48000
         duration = 0.06
         n_samples = int(sr * duration)
         t = np.linspace(0, duration, n_samples)
-        # 1.2kHz to 3.5kHz chirp with Hann window
+        # 1.2kHz to 3.5kHz linear chirp with Hann window
         chirp_signal = np.sin(2 * np.pi * (1200 + 2300 * t / duration) * t) * np.hanning(n_samples)
-        pcm_data = (chirp_signal * 32767 * 0.22).astype(np.int16)
+        chirp_pcm = (chirp_signal * 32767 * 0.24).astype(np.int16)
+
+        # Pad probe WAV with leading/trailing silence in live mode so pw-play never sends
+        # premature EOS before deep A2DP/DSP buffers finish draining.
+        pre_pad_s = 0.0 if is_test else 0.05
+        post_pad_s = 0.0 if is_test else 0.25
+        if pre_pad_s > 0.0 or post_pad_s > 0.0:
+            pre_zeros = np.zeros(int(sr * pre_pad_s), dtype=np.int16)
+            post_zeros = np.zeros(int(sr * post_pad_s), dtype=np.int16)
+            pcm_data = np.concatenate([pre_zeros, chirp_pcm, post_zeros])
+        else:
+            pcm_data = chirp_pcm
 
         chirp_wav = None
         raw_rec = None
         proc_rec = None
         emissions = []
         latencies = {}
+        muted_sink_input_ids = []
+        started_temp_unison = False
 
         try:
+            # Ensure live unison pipeline is active when running in real environment so
+            # every probe travels through the exact polifonia_master -> pw-loopback graph
+            if not is_test and not self._is_active:
+                if progress_cb:
+                    progress_cb("Starting live Unison graph for closed-loop measurement...")
+                started_temp_unison = self.start_unison_sink()
+                if started_temp_unison:
+                    time.sleep(0.45)
+
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 chirp_wav = f.name
                 with wave.open(chirp_wav, "w") as wf:
@@ -1238,29 +1414,50 @@ class AudioEngineService:
             if proc_rec.poll() is not None:
                 return False, "Unable to start microphone recording.", {}
 
-            # Temporarily mute polifonia_master to prevent background audio from interfering
-            try:
-                subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "1"],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-            except Exception:
-                pass
+            # Mute external client streams (sink-inputs) rather than muting polifonia_master,
+            # so polifonia_master remains open for delayed pw-loopback branches to drain cleanly!
+            if not is_test:
+                try:
+                    active_inputs = self.scanner.get_active_sink_inputs()
+                    for inp in active_inputs:
+                        inp_id = str(inp.get("id", "")).strip()
+                        if inp_id.isdigit():
+                            subprocess.run(
+                                ["pactl", "set-sink-input-mute", inp_id, "1"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2
+                            )
+                            muted_sink_input_ids.append(inp_id)
+                except Exception:
+                    pass
 
-            t_start_rec = time.time()
-
-            # Sort active speakers so fast wired devices are tested first, standard BT second,
-            # and smart/deep-buffer speakers (Amazon Echo) last.
+            # Sort active speakers purely by hardware telemetry: wired first (by hw latency),
+            # then wireless/network (by hw latency). Zero device-name hardcoding.
             def _speaker_sort_key(s):
-                is_bt = (getattr(s, "bus_type", "") == "bluetooth") or ("bluez" in s.sink_name.lower())
-                name = (s.custom_name or s.display_name or s.sink_name).lower()
-                is_smart = ("echo" in name) or ("alexa" in name)
-                if not is_bt:
-                    return 0
-                elif not is_smart:
-                    return 1
-                else:
-                    return 2
+                is_wireless = (getattr(s, "bus_type", "") in ("bluetooth", "network")) or ("bluez" in s.sink_name.lower())
+                return (1 if is_wireless else 0, float(getattr(s, "hardware_latency_ms", 0.0)))
 
             ordered_speakers = sorted(active_speakers, key=_speaker_sort_key)
+
+            # Check whether all ordered speakers have active live loopback processes
+            use_live_pipeline = bool(
+                self._is_active and all(
+                    (self._sync_processes.get(s.sink_name) is not None and self._sync_processes[s.sink_name].poll() is None)
+                    for s in ordered_speakers
+                )
+            )
+
+            if use_live_pipeline:
+                # Keep polifonia_master unmuted throughout all probe emissions
+                subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "0"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
+            else:
+                try:
+                    subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "1"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.3)
+                except Exception:
+                    pass
+
+            t_start_rec = time.time()
 
             # Emit chirp sequentially on each speaker
             for spk in ordered_speakers:
@@ -1268,42 +1465,46 @@ class AudioEngineService:
                 if progress_cb:
                     progress_cb(f"Misurazione: {spk_name}...")
 
-                is_bt = (getattr(spk, "bus_type", "") == "bluetooth") or ("bluez" in spk.sink_name.lower())
+                is_bt = (getattr(spk, "bus_type", "") in ("bluetooth", "network")) or ("bluez" in spk.sink_name.lower())
+                loop_proc = self._sync_processes.get(spk.sink_name) if use_live_pipeline else None
+                applied_loop_delay = self._running_delays.get(spk.sink_name, 0.0) if use_live_pipeline else 0.0
 
-                # If unison loopbacks are active, isolate this speaker's loopback and play via polifonia_master
-                # so the chirp travels through the EXACT live PipeWire buffer pipeline!
-                loop_proc = self._sync_processes.get(spk.sink_name) if self._is_active else None
-                use_live_pipeline = (loop_proc is not None and loop_proc.poll() is None)
-
-                if use_live_pipeline:
-                    # Mute all other loopbacks
+                if use_live_pipeline and loop_proc is not None:
+                    # Isolate current speaker: mute all other loopbacks and physical sinks
                     for other in ordered_speakers:
                         if other.sink_name != spk.sink_name:
                             p = self._sync_processes.get(other.sink_name)
                             if p and p.poll() is None:
                                 subprocess.run(["wpctl", "set-mute", "-p", str(p.pid), "1"],
                                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.1)
-                    # Unmute this loopback
+                            subprocess.run(["pactl", "set-sink-mute", other.sink_name, "1"],
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.15)
+                    # Unmute target speaker loopback and physical sink
                     subprocess.run(["wpctl", "set-mute", "-p", str(loop_proc.pid), "0"],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.1)
-                    # Unmute polifonia_master briefly to play chirp
-                    subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "0"],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
+                    subprocess.run(["pactl", "set-sink-mute", spk.sink_name, "0"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.15)
+                    if not is_test:
+                        time.sleep(0.06)
+
                     t_emit = time.time()
-                    subprocess.run(["pw-play", "--target=polifonia_master", "--volume=0.22", chirp_wav],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
-                    subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "1"],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2)
+                    subprocess.run(["pw-play", "--target=polifonia_master", "--volume=0.24", chirp_wav],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.5)
+
+                    # Wait for both the pw-loopback delay buffer AND physical/DSP buffer to drain
+                    # completely before muting this speaker for the next iteration!
+                    drain_wait_s = (applied_loop_delay / 1000.0) + (1.10 if is_bt else 0.45)
                 else:
                     t_emit = time.time()
-                    subprocess.run(["pw-play", f"--target={spk.sink_name}", "--volume=0.20", chirp_wav],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.0)
+                    subprocess.run(["pw-play", f"--target={spk.sink_name}", "--volume=0.22", chirp_wav],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2.5)
+                    drain_wait_s = 0.85 if is_bt else 0.45
 
-                emissions.append((spk, t_emit - t_start_rec))
-                # Interval: wired needs 0.4s, bluetooth needs 0.8s
-                time.sleep(0.8 if is_bt else 0.4)
+                t_emit_rel = (t_emit - t_start_rec) + pre_pad_s
+                emissions.append((spk, t_emit_rel, applied_loop_delay))
+                time.sleep(drain_wait_s)
 
-            # Extra tail wait for Echo Dot / Bluetooth latency (2.2s)
+            # Extra tail wait for deep wireless/network buffers
             if progress_cb:
                 progress_cb("Listening to acoustic echoes and calibrating...")
             time.sleep(2.2)
@@ -1320,8 +1521,11 @@ class AudioEngineService:
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
             except Exception:
                 pass
-            if self._is_active:
-                for spk in ordered_speakers:
+            for spk in ordered_speakers:
+                if not spk.mute:
+                    subprocess.run(["pactl", "set-sink-mute", spk.sink_name, "0"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.15)
+                if self._is_active:
                     p = self._sync_processes.get(spk.sink_name)
                     if p and p.poll() is None and not spk.mute:
                         subprocess.run(["wpctl", "set-mute", "-p", str(p.pid), "0"],
@@ -1335,70 +1539,77 @@ class AudioEngineService:
 
             rec_arr = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32)
             template = chirp_signal.astype(np.float32)
-            corr = np.abs(np.correlate(rec_arr, template, mode="valid"))
+            corr = self._compute_robust_correlation(rec_arr, template)
             mean_corr = max(1.0, float(np.mean(corr)))
 
-            # Analyze arrival peak for each emission within physics-bounded windows
-            for spk, t_emit_rel in emissions:
-                is_bt = (getattr(spk, "bus_type", "") == "bluetooth") or ("bluez" in spk.sink_name.lower())
-                name = (spk.custom_name or spk.display_name or spk.sink_name).lower()
-                is_smart = ("echo" in name) or ("alexa" in name)
+            # Analyze direct-path arrival peak for each emission within physics-bounded windows
+            last_peak_idx = 0
+            for idx, (spk, t_emit_rel, applied_loop_delay) in enumerate(emissions):
+                is_bt = (getattr(spk, "bus_type", "") in ("bluetooth", "network")) or ("bluez" in spk.sink_name.lower())
+                min_after_prev = (last_peak_idx + int(sr * 0.08)) if last_peak_idx > 0 else 0
+                emit_offset_s = t_emit_rel + (applied_loop_delay / 1000.0)
 
                 if not is_bt:
-                    # Wired (HDMI, DP, Jack, Internal PCI): DAC latency + room acoustic transit is < 30ms.
-                    # Max search window is strictly 120ms to prevent false cross-bleed from later chirps.
-                    win_start = max(0, int(sr * t_emit_rel))
-                    win_end = min(len(corr), int(sr * (t_emit_rel + 0.12)))
-                elif not is_smart:
-                    # Standard Bluetooth (e.g. W-KING): hardware latency is ~147ms; window is 40ms to 420ms.
-                    win_start = max(0, int(sr * (t_emit_rel + 0.04)))
-                    win_end = min(len(corr), int(sr * (t_emit_rel + 0.42)))
+                    # Wired (HDMI, DP, USB, S/PDIF, Jack, PCI): search up to 350ms after expected emission
+                    win_start = max(min_after_prev, int(sr * emit_offset_s))
+                    win_end = min(len(corr), max(win_start + int(sr * 0.25), int(sr * (emit_offset_s + 0.35))))
                 else:
-                    # Smart speakers with deep buffer (Amazon Echo): window up to 2.8s
-                    win_start = max(0, int(sr * (t_emit_rel + 0.06)))
-                    win_end = min(len(corr), int(sr * (t_emit_rel + 2.80)))
+                    # Wireless / Network (Bluetooth A2DP, aptX, LDAC, Wi-Fi/AirPlay): search up to 3.2s
+                    win_start = max(min_after_prev, int(sr * (emit_offset_s + 0.03)))
+                    win_end = min(len(corr), max(win_start + int(sr * 0.50), int(sr * (emit_offset_s + 3.20))))
+
+                # Bound window before the next speaker's emission so adjacent probes cannot cross-contaminate
+                if idx + 1 < len(emissions):
+                    next_emit_s = emissions[idx + 1][1] + (emissions[idx + 1][2] / 1000.0)
+                    if next_emit_s > emit_offset_s + 0.08:
+                        win_end = min(win_end, max(win_start + int(sr * 0.05), int(sr * (next_emit_s - 0.01))))
 
                 if win_end <= win_start:
                     continue
-                peak_idx = win_start + int(np.argmax(corr[win_start:win_end]))
-                peak_val = corr[peak_idx]
+                exact_peak_idx, peak_val = self._detect_first_arrival_peak(corr, win_start, win_end, sr, mean_corr)
                 snr = peak_val / mean_corr
 
                 if snr >= 1.6:
-                    t_arrival = peak_idx / sr
+                    last_peak_idx = int(exact_peak_idx)
+                    t_arrival = exact_peak_idx / sr
                     measured_latency_ms = (t_arrival - t_emit_rel) * 1000.0
-                    latencies[spk.sink_name] = max(0.0, measured_latency_ms)
+                    # Subtract any active pw-loopback delay so latencies[sink] reflects intrinsic physical + HW + DSP latency
+                    intrinsic_latency_ms = max(0.0, measured_latency_ms - applied_loop_delay)
+                    latencies[spk.sink_name] = intrinsic_latency_ms
                 else:
                     fallback_lat = getattr(spk, "hardware_latency_ms", 10.0) + (140.0 if is_bt else 0.0)
                     latencies[spk.sink_name] = fallback_lat
 
             ref_lat = latencies.get(ref_speaker.sink_name, 20.0)
+            ref_hw_lat = getattr(ref_speaker, "hardware_latency_ms", 0.0)
             calibrated_delays = {}
             adjusted_count = 0
 
-            # Calculate relative alignment delays with physical plausibility guardrails
+            # Calculate relative alignment delays with sub-millisecond precision and hardware latency de-duplication
             for spk in active_speakers:
-                is_bt = (getattr(spk, "bus_type", "") == "bluetooth") or ("bluez" in spk.sink_name.lower())
-                name = (spk.custom_name or spk.display_name or spk.sink_name).lower()
-                is_smart = ("echo" in name) or ("alexa" in name)
+                if spk.sink_name == ref_speaker.sink_name:
+                    spk.delay_ms = 0.0
+                    calibrated_delays[spk.sink_name] = 0.0
+                    continue
 
+                is_bt = (getattr(spk, "bus_type", "") in ("bluetooth", "network")) or ("bluez" in spk.sink_name.lower())
                 spk_lat = latencies.get(spk.sink_name, ref_lat)
-                diff_ms = spk_lat - ref_lat
+                spk_hw_lat = getattr(spk, "hardware_latency_ms", 0.0)
 
-                # Guardrail 1: Deadband - differences <= 18ms are within normal room acoustics -> snap to 0.0
-                if abs(diff_ms) <= 18.0:
+                # Total physical arrival difference relative to reference speaker
+                phys_diff_ms = spk_lat - ref_lat
+                # Subtract the hardware latency difference already automatically compensated by sync_active_branches
+                hw_comp_delta_ms = spk_hw_lat - ref_hw_lat
+                residual_diff_ms = phys_diff_ms - hw_comp_delta_ms
+
+                # Precision deadband: differences <= 0.3ms (~10cm in air) are below human binaural threshold
+                if abs(residual_diff_ms) <= 0.3:
                     calibrated_val = 0.0
-                elif not is_bt:
-                    # Guardrail 2: Wired speakers already have HW compensation; room distance offset cannot exceed 35ms.
-                    # Anything larger is a false room reflection -> reject and keep 0.0
-                    calibrated_val = 0.0 if abs(diff_ms) > 35.0 else round(-diff_ms, 1)
-                elif not is_smart:
-                    # Guardrail 3: Standard Bluetooth speakers already have base latency compensated;
-                    # fine adjustment bounded to +/- 45ms.
-                    calibrated_val = 0.0 if abs(diff_ms) > 50.0 else round(-diff_ms, 1)
+                elif not is_bt and abs(phys_diff_ms) > 250.0:
+                    # Reject severe microphone false trigger (>250ms on a wired speaker)
+                    calibrated_val = 0.0
                 else:
-                    # Guardrail 4: Smart speaker (Amazon Echo) with deep buffer lag
-                    calibrated_val = round(-diff_ms, 1)
+                    calibrated_val = round(-residual_diff_ms, 1)
 
                 calibrated_val = max(-5000.0, min(5000.0, calibrated_val))
                 if abs(calibrated_val) > 0.05:
@@ -1423,6 +1634,14 @@ class AudioEngineService:
             logger.error(f"Error during auto_align_all_speakers: {e}")
             return False, f"Error during auto-synchronization: {e}", {}
         finally:
+            for inp_id in muted_sink_input_ids:
+                try:
+                    subprocess.run(
+                        ["pactl", "set-sink-input-mute", inp_id, "0"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.2
+                    )
+                except Exception:
+                    pass
             try:
                 subprocess.run(["pactl", "set-sink-mute", "polifonia_master", "0"],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)

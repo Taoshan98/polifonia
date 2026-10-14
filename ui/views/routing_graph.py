@@ -537,7 +537,18 @@ class RoutingGraphCanvas(Gtk.DrawingArea):
         cr.stroke()
 
         # Bus Badge
-        bus_label = "BT" if bus == "bluetooth" else ("HDMI/DP" if bus == "hdmi" else ("USB" if bus == "usb" else "PCI"))
+        if bus == "bluetooth":
+            bus_label = "BT"
+        elif bus == "hdmi":
+            bus_label = "HDMI/DP"
+        elif bus == "usb":
+            bus_label = "USB"
+        elif bus == "spdif":
+            bus_label = "S/PDIF"
+        elif bus == "network":
+            bus_label = "NET"
+        else:
+            bus_label = "PCI"
         layout = PangoCairo.create_layout(cr)
         layout.set_font_description(Pango.FontDescription.from_string("Sans Bold 7.5"))
         layout.set_text(bus_label, -1)
@@ -584,7 +595,8 @@ class RoutingGraphCanvas(Gtk.DrawingArea):
         layout.set_font_description(Pango.FontDescription.from_string("Sans 8"))
         if is_enabled:
             delay_str = f"+{total_delay:.1f} ms delay" if total_delay > 0.05 else "0.0 ms delay"
-            info_txt = f"Volume: {vol_pct}% • {delay_str}"
+            phase_str = " • Ø 180°" if dst.get("phase_inverted", False) else ""
+            info_txt = f"Volume: {vol_pct}% • {delay_str}{phase_str}"
             cr.set_source_rgba(0.28, 0.62, 0.96, 0.85)
         else:
             info_txt = "Channel excluded from playback"

@@ -239,7 +239,95 @@ Sink Input #601
             self.assertTrue(inp["is_active"])
             self.assertFalse(inp["corked"])
 
+    def test_scan_usb_iec958_spdif_and_network_sinks_preserved(self):
+        """Verify USB IEC958 DACs, PCI S/PDIF optical outputs, and Network/AirPlay sinks are not dropped when no HDMI ELD monitor is present."""
+        mock_pw_dump = [
+            {
+                "id": 201,
+                "type": "PipeWire:Interface:Node",
+                "info": {
+                    "props": {
+                        "media.class": "Audio/Sink",
+                        "node.name": "alsa_output.usb-FiiO_K7_DAC-00.iec958-stereo",
+                        "node.description": "FiiO K7 Digital Stereo (IEC958)",
+                        "device.bus": "usb"
+                    }
+                }
+            },
+            {
+                "id": 202,
+                "type": "PipeWire:Interface:Node",
+                "info": {
+                    "props": {
+                        "media.class": "Audio/Sink",
+                        "node.name": "alsa_output.pci-0000_00_1f.3.iec958-stereo",
+                        "node.description": "Built-in Audio Digital Stereo (IEC958)",
+                        "device.bus": "pci"
+                    }
+                }
+            },
+            {
+                "id": 203,
+                "type": "PipeWire:Interface:Node",
+                "info": {
+                    "props": {
+                        "media.class": "Audio/Sink",
+                        "node.name": "raop_sink.LivingRoom_HomePod.local",
+                        "node.description": "Living Room HomePod"
+                    }
+                }
+            }
+        ]
+        with patch("subprocess.check_output", return_value=json.dumps(mock_pw_dump)), \
+             patch.object(DeviceScanner, "get_eld_monitors", return_value={}), \
+             patch("subprocess.run"):
+            sinks = DeviceScanner.scan_sinks()
+            self.assertEqual(len(sinks), 3)
+            sink_map = {s.id: s for s in sinks}
+            self.assertEqual(sink_map[201].bus_type, "usb")
+            self.assertEqual(sink_map[202].bus_type, "spdif")
+            self.assertEqual(sink_map[203].bus_type, "network")
+
+    def test_scan_bluetooth_codec_aware_latency_fallback(self):
+        """Verify Bluetooth sinks without SPA Latency params estimate latency from api.bluez5.codec."""
+        mock_pw_dump = [
+            {
+                "id": 301,
+                "type": "PipeWire:Interface:Node",
+                "info": {
+                    "props": {
+                        "media.class": "Audio/Sink",
+                        "node.name": "bluez_output.AA_BB_CC.1",
+                        "node.description": "Low Latency Headphones",
+                        "device.bus": "bluetooth",
+                        "api.bluez5.codec": "aptx_ll"
+                    }
+                }
+            },
+            {
+                "id": 302,
+                "type": "PipeWire:Interface:Node",
+                "info": {
+                    "props": {
+                        "media.class": "Audio/Sink",
+                        "node.name": "bluez_output.DD_EE_FF.1",
+                        "node.description": "Sony LDAC Speaker",
+                        "device.bus": "bluetooth",
+                        "api.bluez5.codec": "ldac"
+                    }
+                }
+            }
+        ]
+        with patch("subprocess.check_output", return_value=json.dumps(mock_pw_dump)), \
+             patch.object(DeviceScanner, "get_eld_monitors", return_value={}), \
+             patch("subprocess.run"):
+            sinks = DeviceScanner.scan_sinks()
+            sink_map = {s.id: s for s in sinks}
+            self.assertEqual(sink_map[301].latency_ms, 65.0)
+            self.assertEqual(sink_map[302].latency_ms, 170.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

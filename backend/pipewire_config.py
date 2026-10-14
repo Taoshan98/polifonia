@@ -70,16 +70,18 @@ class PipeWireConfigGenerator:
         lines.append('                    { type = builtin label = copy name = input_FL }')
         lines.append('                    { type = builtin label = copy name = input_FR }')
 
-        # 2. Add Filter Nodes for each active channel
+        # 2. Add Filter, Delay, and Gain/Polarity Nodes for each active channel
         for ch in active_channels:
             gain_val = ch.volume_gain * system_config.master_volume
-            delay_sec = ch.delay_ms / 1000.0
+            if getattr(ch, "phase_inverted", False):
+                gain_val = -gain_val
+            delay_sec = max(0.0, ch.delay_ms) / 1000.0
 
             # Crossover logic
             if ch.role == SpeakerRole.SUBWOOFER and system_config.crossover_enabled:
                 # Low-pass filter (Butterworth 2nd order)
                 filter_def = f'type = builtin label = bq_lowpass control = {{ "Freq" = {system_config.crossover_freq} "Q" = 0.707 }}'
-            elif (ch.role in (SpeakerRole.LEFT, SpeakerRole.RIGHT)) and system_config.crossover_enabled:
+            elif (ch.role in (SpeakerRole.LEFT, SpeakerRole.RIGHT, SpeakerRole.SURROUND_LEFT, SpeakerRole.SURROUND_RIGHT)) and system_config.crossover_enabled:
                 # High-pass filter (Butterworth 2nd order)
                 filter_def = f'type = builtin label = bq_highpass control = {{ "Freq" = {system_config.crossover_freq} "Q" = 0.707 }}'
             else:
@@ -88,23 +90,39 @@ class PipeWireConfigGenerator:
 
             lines.append(f"                    # Filter chain for Sink {ch.sink_id} ({ch.role.value})")
             lines.append(f'                    {{ {filter_def} name = filter_{ch.sink_id} }}')
+            if delay_sec > 0.0:
+                lines.append(f'                    {{ type = builtin label = delay name = delay_{ch.sink_id} config = {{ "max-delay" = 5.0 }} control = {{ "Delay (s)" = {delay_sec:.4f} }} }}')
+            if abs(gain_val - 1.0) > 0.001:
+                lines.append(f'                    {{ type = builtin label = linear name = gain_{ch.sink_id} control = {{ "Mult" = {gain_val:.4f} "Add" = 0.0 }} }}')
 
         lines.extend([
             "                ]",
             "                links = ["
         ])
 
-        # 3. Add Links from Input Splitters to Filters
+        # 3. Add Links from Input Splitters to Filters (and optional Delay/Gain stages)
         for ch in active_channels:
+            gain_val = ch.volume_gain * system_config.master_volume
+            if getattr(ch, "phase_inverted", False):
+                gain_val = -gain_val
+            delay_sec = max(0.0, ch.delay_ms) / 1000.0
+
             # Route left or right input channel to appropriate filter
-            if ch.role == SpeakerRole.LEFT:
+            if ch.role in (SpeakerRole.LEFT, SpeakerRole.SURROUND_LEFT):
                 lines.append(f'                    {{ output = "input_FL:Out" input = "filter_{ch.sink_id}:In" }}')
-            elif ch.role == SpeakerRole.RIGHT:
+            elif ch.role in (SpeakerRole.RIGHT, SpeakerRole.SURROUND_RIGHT):
                 lines.append(f'                    {{ output = "input_FR:Out" input = "filter_{ch.sink_id}:In" }}')
             else:
-                # Stereo, Center, Subwoofer, Surround: receive both channels
+                # Stereo, Center, Subwoofer: receive both channels
                 lines.append(f'                    {{ output = "input_FL:Out" input = "filter_{ch.sink_id}:In" }}')
                 lines.append(f'                    {{ output = "input_FR:Out" input = "filter_{ch.sink_id}:In" }}')
+
+            prev_node = f"filter_{ch.sink_id}"
+            if delay_sec > 0.0:
+                lines.append(f'                    {{ output = "{prev_node}:Out" input = "delay_{ch.sink_id}:In" }}')
+                prev_node = f"delay_{ch.sink_id}"
+            if abs(gain_val - 1.0) > 0.001:
+                lines.append(f'                    {{ output = "{prev_node}:Out" input = "gain_{ch.sink_id}:In" }}')
 
         lines.extend([
             "                ]",
@@ -119,6 +137,8 @@ class PipeWireConfigGenerator:
             '                node.name      = "polifonia_sink"',
             '                media.class    = "Audio/Sink"',
             '                node.description = "Polifonia 2.1 Studio Master"',
+            "                resample.quality = 10",
+            "                channelmix.normalize = true",
             "            }",
             "        }",
             "    }",

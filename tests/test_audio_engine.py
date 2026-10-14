@@ -930,6 +930,46 @@ class TestAudioEngine(unittest.TestCase):
             # Echo dot should have a calculated negative offset relative to wired
             self.assertTrue(delays["bt_echo"] <= 0.0)
 
+    def test_detect_first_arrival_peak_rejects_stronger_late_reflection(self):
+        """Verify _detect_first_arrival_peak selects the direct-path wavefront over a stronger late room reflection."""
+        import numpy as np
+        sr = 48000
+        corr = np.ones(4800, dtype=np.float32) * 10.0
+        # Direct wave arrives at sample 1000 with amplitude 800
+        corr[999] = 600.0
+        corr[1000] = 800.0
+        corr[1001] = 700.0
+        # Valley between direct wave and desk/wall reflection drops to noise floor (10.0)
+        # Stronger room reflection arrives 6ms later (sample 1288) with amplitude 1000
+        corr[1287] = 750.0
+        corr[1288] = 1000.0
+        corr[1289] = 750.0
+
+        exact_idx, peak_val = self.service._detect_first_arrival_peak(corr, 500, 2000, sr, noise_floor=10.0)
+        # Must lock onto direct wave around sample 1000 (not 1288) with sub-sample parabolic refinement
+        self.assertAlmostEqual(exact_idx, 1000.166, delta=0.05)
+        self.assertAlmostEqual(peak_val, 800.0, delta=1.0)
+
+    def test_set_speaker_phase_and_high_quality_resampler_props(self):
+        """Verify set_speaker_phase updates polarity and _spawn_loopback uses resample.quality=10."""
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=10, sink_name="spk_stereo", role=SpeakerRole.STEREO, phase_inverted=False)
+        ]
+        mock_proc = MagicMock(poll=MagicMock(return_value=None), pid=4321)
+        with patch.object(self.service, "_ensure_master_sink", return_value=True), \
+             patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
+             patch("subprocess.run"):
+            self.service.start_unison_sink()
+            cmd_initial = " ".join(mock_popen.call_args[0][0])
+            self.assertIn("resample.quality=10", cmd_initial)
+            self.assertIn("channelmix.normalize=true", cmd_initial)
+
+            # Invert phase on spk_stereo -> should restart branch with inverted stereo position
+            self.service.set_speaker_phase("spk_stereo", True)
+            self.assertTrue(self.service.config.channels[0].phase_inverted)
+            cmd_inverted = " ".join(mock_popen.call_args[0][0])
+            self.assertIn("audio.position=[ FR, FL ]", cmd_inverted)
+
     def test_reset_all_delays(self):
         """Verify reset_all_delays sets delay_ms to 0.0 for all channels and persists."""
         self.service.config.channels = [
@@ -942,9 +982,115 @@ class TestAudioEngine(unittest.TestCase):
             self.assertEqual(self.service.config.channels[0].delay_ms, 0.0)
             self.assertEqual(self.service.config.channels[1].delay_ms, 0.0)
 
+    def test_hilbert_analytic_correlation_phase_invariance(self):
+        """Verify _compute_robust_correlation is invariant to 90° quadrature and 180° polarity phase rotations."""
+        import numpy as np
+        sr = 48000
+        duration = 0.06
+        n_samples = int(sr * duration)
+        t = np.linspace(0, duration, n_samples)
+        hann = np.hanning(n_samples)
+        phase_arg = 2 * np.pi * (1200 + 2300 * t / duration) * t
+
+        template = (np.sin(phase_arg) * hann).astype(np.float32)
+        # 90-degree quadrature-shifted signal (cosine instead of sine) and 180-degree inverted signal
+        quad_chirp = (np.cos(phase_arg) * hann).astype(np.float32)
+        inv_chirp = (-np.sin(phase_arg) * hann).astype(np.float32)
+
+        rec_quad = np.zeros(sr, dtype=np.float32)
+        rec_inv = np.zeros(sr, dtype=np.float32)
+        true_idx = 12345
+        rec_quad[true_idx:true_idx + n_samples] = quad_chirp
+        rec_inv[true_idx:true_idx + n_samples] = inv_chirp
+
+        corr_quad = self.service._compute_robust_correlation(rec_quad, template)
+        corr_inv = self.service._compute_robust_correlation(rec_inv, template)
+
+        peak_quad, _ = self.service._detect_first_arrival_peak(corr_quad, 10000, 15000, sr, float(np.mean(corr_quad)))
+        peak_inv, _ = self.service._detect_first_arrival_peak(corr_inv, 10000, 15000, sr, float(np.mean(corr_inv)))
+
+        self.assertAlmostEqual(peak_quad, float(true_idx), delta=1.0)
+        self.assertAlmostEqual(peak_inv, float(true_idx), delta=1.0)
+
+    def test_closed_loop_auto_align_deduces_unreported_dsp_buffer_agnostically(self):
+        """Verify closed-loop calibration deduces an unreported 170ms DSP buffer purely via math without name heuristics."""
+        import numpy as np
+        # Generic speaker names ("device_alpha", "device_beta", "device_gamma") -> zero brand/name clues
+        self.service.config.channels = [
+            SpeakerConfig(sink_id=1, sink_name="alsa_output.device_alpha", display_name="Device Alpha",
+                          role=SpeakerRole.STEREO, delay_ms=0.0, hardware_latency_ms=10.0, bus_type="hdmi"),
+            SpeakerConfig(sink_id=2, sink_name="bluez_output.device_beta", display_name="Device Beta",
+                          role=SpeakerRole.STEREO, delay_ms=0.0, hardware_latency_ms=144.1, bus_type="bluetooth"),
+            SpeakerConfig(sink_id=3, sink_name="bluez_output.device_gamma", display_name="Device Gamma",
+                          role=SpeakerRole.STEREO, delay_ms=0.0, hardware_latency_ms=155.9, bus_type="bluetooth"),
+        ]
+
+        # Simulate active live unison pipeline where Level-1 hardware latency compensation is already running:
+        # max_hw = 155.9 -> alpha has 145.9ms loop delay, beta has 11.8ms loop delay, gamma has 0.0ms loop delay
+        self.service._is_active = True
+        self.service._sync_processes = {
+            "alsa_output.device_alpha": MagicMock(poll=MagicMock(return_value=None), pid=101),
+            "bluez_output.device_beta": MagicMock(poll=MagicMock(return_value=None), pid=102),
+            "bluez_output.device_gamma": MagicMock(poll=MagicMock(return_value=None), pid=103),
+        }
+        self.service._running_delays = {
+            "alsa_output.device_alpha": 145.9,
+            "bluez_output.device_beta": 11.8,
+            "bluez_output.device_gamma": 0.0,
+        }
+
+        sr = 48000
+        duration = 0.06
+        n_samples = int(sr * duration)
+        t = np.linspace(0, duration, n_samples)
+        chirp = (np.sin(2 * np.pi * (1200 + 2300 * t / duration) * t) * np.hanning(n_samples) * 32767 * 0.24).astype(np.int16)
+
+        # Controlled deterministic clock:
+        # t_start_rec = 100.0
+        # Emission 1 (alpha): t_emit = 100.10 -> t_emit_rel = 0.10s.
+        #   Loop delay = 145.9ms, physical HW = 10.0ms -> arrives at 0.10 + 0.1459 + 0.0100 = 0.2559s
+        # Emission 2 (beta):  t_emit = 101.00 -> t_emit_rel = 1.00s.
+        #   Loop delay = 11.8ms, physical HW = 144.1ms (0ms hidden DSP) -> arrives at 1.00 + 0.0118 + 0.1441 = 1.1559s
+        # Emission 3 (gamma): t_emit = 102.50 -> t_emit_rel = 2.50s.
+        #   Loop delay = 0.0ms, physical HW = 155.9ms + 170.0ms hidden DSP = 325.9ms -> arrives at 2.50 + 0.3259 = 2.8259s
+        sim_audio = np.zeros(sr * 5, dtype=np.float32)
+        for arr_s in (0.2559, 1.1559, 2.8259):
+            idx = int(round(arr_s * sr))
+            sim_audio[idx:idx + n_samples] += chirp.astype(np.float32)
+        sim_pcm = np.clip(sim_audio, -32767, 32767).astype(np.int16)
+
+        mock_proc_rec = MagicMock()
+        mock_proc_rec.poll.return_value = None
+        mock_proc_rec.wait.return_value = None
+
+        def _mock_popen(cmd, *args, **kwargs):
+            if isinstance(cmd, list) and cmd and cmd[0] == "pw-record":
+                raw_path = cmd[-1]
+                with open(raw_path, "wb") as f:
+                    f.write(sim_pcm.tobytes())
+            return mock_proc_rec
+
+        time_seq = iter([99.9, 100.0, 100.10, 101.00, 102.50, 104.0, 105.0])
+
+        with patch("subprocess.Popen", side_effect=_mock_popen), \
+             patch("subprocess.run"), \
+             patch("time.sleep"), \
+             patch("time.time", side_effect=lambda: next(time_seq, 105.0)), \
+             patch.object(self.service, "sync_active_branches"):
+
+            success, msg, delays = self.service.auto_align_all_speakers()
+            self.assertTrue(success, msg)
+            # Reference wired speaker is 0.0ms
+            self.assertAlmostEqual(delays["alsa_output.device_alpha"], 0.0, delta=0.3)
+            # Standard BT speaker whose AVDTP report matches reality is 0.0ms
+            self.assertAlmostEqual(delays["bluez_output.device_beta"], 0.0, delta=0.3)
+            # Black-box DSP speaker with 170ms unreported internal buffer is deduced as -170.0ms!
+            self.assertAlmostEqual(delays["bluez_output.device_gamma"], -170.0, delta=0.5)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
