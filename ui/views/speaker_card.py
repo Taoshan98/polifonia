@@ -4,12 +4,12 @@ import threading
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, GLib
 from core.models import SpeakerConfig, SpeakerRole
 
 
 class SpeakerCard(Gtk.Box):
-    """Refined horizontal channel row card representing an audio output endpoint."""
+    """Horizontal channel row card representing an audio output endpoint."""
 
     def __init__(self, channel: SpeakerConfig, on_change_cb, on_test_cb, audio_service=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -21,6 +21,7 @@ class SpeakerCard(Gtk.Box):
         self._vol_debounce_id = 0
         self._delay_debounce_id = 0
         self._enable_debounce_id = 0
+        self._calib_apply_handler_id = 0
 
         self.add_css_class("channel-card")
         self.set_hexpand(True)
@@ -29,27 +30,22 @@ class SpeakerCard(Gtk.Box):
         self._sync_state()
 
     def _build_ui(self):
-        # 1. Header Row: Title & Device Info (Icon + Custom Title + Rename + Connection Badge + Subtitle)
+        # 1. Header Row: Hardware Icon + Custom Title + Rename + Connection Badge + Hardware Subtitle
         title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         title_row.set_valign(Gtk.Align.CENTER)
 
-        # Hardware Icon
-        icon_name = self._resolve_icon()
-        self.icon_widget = Gtk.Image.new_from_icon_name(icon_name)
+        self.icon_widget = Gtk.Image.new_from_icon_name(self._resolve_icon())
         self.icon_widget.set_pixel_size(20)
         self.icon_widget.add_css_class("strip-icon")
         title_row.append(self.icon_widget)
 
-        # Title Label
-        display_title = self._get_display_title()
-        self.title_label = Gtk.Label(label=display_title)
+        self.title_label = Gtk.Label(label=self._get_display_title())
         self.title_label.set_tooltip_text(self._get_title_tooltip())
         self.title_label.add_css_class("strip-title")
         if self.channel.custom_name:
             self.title_label.add_css_class("strip-title-custom")
         self.title_label.set_halign(Gtk.Align.START)
 
-        # Rename Edit Button & Popover
         self.edit_btn = Gtk.Button.new_from_icon_name("document-edit-symbolic")
         self.edit_btn.set_tooltip_text("Customize output name")
         self.edit_btn.add_css_class("flat")
@@ -58,7 +54,6 @@ class SpeakerCard(Gtk.Box):
         self._setup_rename_popover()
         self.edit_btn.connect("clicked", lambda b: self.popover.popup())
 
-        # Allow clicking title to open rename popover
         title_click = Gtk.GestureClick()
         title_click.connect("released", lambda g, n, x, y: self.popover.popup())
         self.title_label.add_controller(title_click)
@@ -66,27 +61,22 @@ class SpeakerCard(Gtk.Box):
         title_row.append(self.title_label)
         title_row.append(self.edit_btn)
 
-        # Connection Badge (e.g. HDMI, DP, USB, BT, PCI)
-        conn_type = self._resolve_connection_badge()
-        self.badge_label = Gtk.Label(label=conn_type)
+        self.badge_label = Gtk.Label(label=self._resolve_connection_badge())
         self.badge_label.add_css_class("conn-badge")
         title_row.append(self.badge_label)
 
-        # Hardware Description
         hw_desc = self._short_name(self.channel.display_name or self.channel.sink_name)
         self.desc_label = Gtk.Label(label=f"({hw_desc})")
         self.desc_label.add_css_class("dim-label")
         self.desc_label.set_halign(Gtk.Align.START)
         title_row.append(self.desc_label)
-
         self.append(title_row)
 
-        # 2. Controls Row (Volume -> Ruolo -> Delay -> Test -> Switch On/Off)
+        # 2. Controls Row: Volume Slider -> Delay Controls -> Test Button -> Enable Switch
         controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
         controls_row.set_valign(Gtk.Align.CENTER)
         controls_row.set_hexpand(True)
 
-        # 2A. Barra del volume (Expands to utilize available width proportionally)
         vol_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         vol_box.set_valign(Gtk.Align.CENTER)
         vol_box.set_hexpand(True)
@@ -107,21 +97,7 @@ class SpeakerCard(Gtk.Box):
         vol_box.append(self.vol_badge)
         controls_row.append(vol_box)
 
-        # 2B. Selettore Ruolo (Nascosto su richiesta UI, default Stereo)
-        self.role_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        self.role_box.set_valign(Gtk.Align.CENTER)
-        self.role_box.set_visible(False)
-
-        self.role_btn = Gtk.MenuButton()
-        self.role_btn.add_css_class("flat")
-        self.role_btn.add_css_class("role-pill")
-        self.role_btn.set_halign(Gtk.Align.FILL)
-        self.role_btn.set_visible(False)
-        self._setup_role_popover()
-        self.role_box.append(self.role_btn)
-        controls_row.append(self.role_box)
-
-        # 2C. Delay controls section (up to 5000ms, manual entry and acoustic calibration)
+        # Delay controls section (-5000ms to +5000ms, manual entry & acoustic calibration)
         delay_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         delay_box.set_valign(Gtk.Align.CENTER)
         delay_box.set_size_request(300, -1)
@@ -131,17 +107,12 @@ class SpeakerCard(Gtk.Box):
         delay_lbl.add_css_class("dim-label")
         delay_box.append(delay_lbl)
 
-        self.btn_delay_minus_10 = Gtk.Button(label="-10")
-        self.btn_delay_minus_10.set_tooltip_text("Decrease delay (-10 ms)")
-        self.btn_delay_minus_10.add_css_class("delay-btn")
-        self.btn_delay_minus_10.connect("clicked", lambda b: self._step_delay(-10.0))
-        delay_box.append(self.btn_delay_minus_10)
-
-        self.btn_delay_minus = Gtk.Button(label="-2")
-        self.btn_delay_minus.set_tooltip_text("Fine adjust (-2 ms)")
-        self.btn_delay_minus.add_css_class("delay-btn")
-        self.btn_delay_minus.connect("clicked", lambda b: self._step_delay(-2.0))
-        delay_box.append(self.btn_delay_minus)
+        for lbl, tip, step in (("-10", "Decrease delay (-10 ms)", -10.0), ("-2", "Fine adjust (-2 ms)", -2.0)):
+            btn = Gtk.Button(label=lbl)
+            btn.set_tooltip_text(tip)
+            btn.add_css_class("delay-btn")
+            btn.connect("clicked", lambda b, s=step: self._step_delay(s))
+            delay_box.append(btn)
 
         self.delay_badge = Gtk.Label()
         self.delay_badge.add_css_class("delay-badge")
@@ -150,17 +121,12 @@ class SpeakerCard(Gtk.Box):
         self.delay_badge.set_cursor_from_name("pointer")
         delay_box.append(self.delay_badge)
 
-        self.btn_delay_plus = Gtk.Button(label="+2")
-        self.btn_delay_plus.set_tooltip_text("Fine adjust (+2 ms)")
-        self.btn_delay_plus.add_css_class("delay-btn")
-        self.btn_delay_plus.connect("clicked", lambda b: self._step_delay(+2.0))
-        delay_box.append(self.btn_delay_plus)
-
-        self.btn_delay_plus_10 = Gtk.Button(label="+10")
-        self.btn_delay_plus_10.set_tooltip_text("Increase delay (+10 ms)")
-        self.btn_delay_plus_10.add_css_class("delay-btn")
-        self.btn_delay_plus_10.connect("clicked", lambda b: self._step_delay(+10.0))
-        delay_box.append(self.btn_delay_plus_10)
+        for lbl, tip, step in (("+2", "Fine adjust (+2 ms)", 2.0), ("+10", "Increase delay (+10 ms)", 10.0)):
+            btn = Gtk.Button(label=lbl)
+            btn.set_tooltip_text(tip)
+            btn.add_css_class("delay-btn")
+            btn.connect("clicked", lambda b, s=step: self._step_delay(s))
+            delay_box.append(btn)
 
         self.btn_delay_zero = Gtk.Button(label="0")
         self.btn_delay_zero.set_tooltip_text("Reset delay (0 ms)")
@@ -170,26 +136,22 @@ class SpeakerCard(Gtk.Box):
 
         self.btn_delay_opts = Gtk.Button()
         self.btn_delay_opts.set_icon_name("document-edit-symbolic")
-        self.btn_delay_opts.set_tooltip_text("Manual delay input or microphone calibration")
+        self.btn_delay_opts.set_tooltip_text("Manual delay input, polarity & microphone calibration")
         self.btn_delay_opts.add_css_class("flat")
         self.btn_delay_opts.add_css_class("delay-opts-btn")
         delay_box.append(self.btn_delay_opts)
 
-        # Headless scale to preserve test compatibility (supports -5000ms to +5000ms)
         self.delay_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -5000.0, 5000.0, 1.0)
         self.delay_scale.set_value(self.channel.delay_ms)
         self.delay_scale.connect("value-changed", self._on_delay_changed)
 
         self._setup_delay_popover()
 
-        # Click badge to open delay popover
         badge_click = Gtk.GestureClick()
         badge_click.connect("released", lambda g, n, x, y: self.delay_popover.popup())
         self.delay_badge.add_controller(badge_click)
-
         controls_row.append(delay_box)
 
-        # 2D. Test button
         self.test_btn = Gtk.Button(label=" Test")
         self.test_btn.set_icon_name("audio-volume-high-symbolic")
         self.test_btn.add_css_class("flat")
@@ -199,7 +161,6 @@ class SpeakerCard(Gtk.Box):
         self.test_btn.connect("clicked", self._on_test_clicked)
         controls_row.append(self.test_btn)
 
-        # 2E. Device enable toggle switch
         self.enable_switch = Gtk.Switch()
         self.enable_switch.set_valign(Gtk.Align.CENTER)
         self.enable_switch.connect("notify::active", self._on_enable_toggled)
@@ -207,71 +168,18 @@ class SpeakerCard(Gtk.Box):
 
         self.append(controls_row)
 
-    def _setup_role_popover(self):
-        popover = Gtk.Popover()
-        menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        menu_box.set_margin_top(6)
-        menu_box.set_margin_bottom(6)
-        menu_box.set_margin_start(6)
-        menu_box.set_margin_end(6)
-
-        roles = [
-            ("Stereo", SpeakerRole.STEREO),
-            ("Left Channel (L)", SpeakerRole.LEFT),
-            ("Right Channel (R)", SpeakerRole.RIGHT),
-            ("Subwoofer (LFE)", SpeakerRole.SUBWOOFER),
-            ("Center", SpeakerRole.CENTER),
-            ("Surround Left", SpeakerRole.SURROUND_LEFT),
-            ("Surround Right", SpeakerRole.SURROUND_RIGHT),
-            ("Excluded / Disabled", SpeakerRole.EXCLUDED),
-        ]
-
-        for label, role in roles:
-            btn = Gtk.Button(label=label)
-            btn.add_css_class("flat")
-            btn.set_halign(Gtk.Align.FILL)
-            btn.connect("clicked", self._make_role_handler(role, popover))
-            menu_box.append(btn)
-
-        popover.set_child(menu_box)
-        self.role_btn.set_popover(popover)
-        self._update_role_button_label()
-
-    def _make_role_handler(self, role, popover):
-        def _handler(b):
-            popover.popdown()
-            self._on_role_clicked(role)
-        return _handler
-
-    def _update_role_button_label(self):
-        role_names = {
-            SpeakerRole.STEREO: "Stereo",
-            SpeakerRole.LEFT: "Left (L)",
-            SpeakerRole.RIGHT: "Right (R)",
-            SpeakerRole.SUBWOOFER: "Subwoofer",
-            SpeakerRole.CENTER: "Center",
-            SpeakerRole.SURROUND_LEFT: "Surround L",
-            SpeakerRole.SURROUND_RIGHT: "Surround R",
-            SpeakerRole.EXCLUDED: "Excluded",
-            SpeakerRole.DISABLED: "Disabled"
-        }
-        lbl = role_names.get(self.channel.role, str(self.channel.role))
-        self.role_btn.set_label(f"{lbl}  ▾")
-
     def _resolve_icon(self) -> str:
         name = (self.channel.display_name or self.channel.sink_name).lower()
         bus = getattr(self.channel, "bus_type", "").lower()
         if bus == "bluetooth" or "bluetooth" in name or "bluez" in name:
             return "audio-headphones-bluetooth"
-        elif bus == "network" or "airplay" in name or "raop" in name:
+        if bus == "network" or "airplay" in name or "raop" in name:
             return "network-wireless-symbolic"
-        elif bus == "hdmi" or "monitor" in name or "hdmi" in name or "displayport" in name:
+        if bus == "hdmi" or any(k in name for k in ("monitor", "hdmi", "displayport")):
             return "video-display-symbolic"
-        elif bus == "usb" or "usb" in name or "dac" in name:
+        if bus == "usb" or "usb" in name or "dac" in name:
             return "audio-card-analog-usb-symbolic"
-        elif "speaker" in name or "laptop" in name or "internal" in name:
-            return "audio-speakers-symbolic"
-        elif "headphone" in name:
+        if "headphone" in name:
             return "audio-headphones-symbolic"
         return "audio-speakers-symbolic"
 
@@ -280,35 +188,32 @@ class SpeakerCard(Gtk.Box):
         bus = getattr(self.channel, "bus_type", "").lower()
         if bus == "bluetooth" or "bluetooth" in name or "bluez" in name:
             return "BT"
-        elif bus == "network" or "airplay" in name or "raop" in name:
+        if bus == "network" or "airplay" in name or "raop" in name:
             return "NET"
-        elif bus == "spdif" or "spdif" in name or "toslink" in name or "optical" in name:
+        if bus == "spdif" or any(k in name for k in ("spdif", "toslink", "optical")):
             return "SPDIF"
-        elif "displayport" in name or "dp" in name:
+        if "displayport" in name or "dp" in name:
             return "DP"
-        elif bus == "hdmi" or "hdmi" in name:
+        if bus == "hdmi" or "hdmi" in name:
             return "HDMI"
-        elif bus == "usb" or "usb" in name:
+        if bus == "usb" or "usb" in name:
             return "USB"
-        elif bus == "pci" or "pci" in name or "speaker" in name:
+        if bus == "pci" or "pci" in name or "speaker" in name:
             return "PCI"
         return "OUT"
 
     def _short_name(self, full_name: str) -> str:
         cleaned = full_name.replace("Monitor ", "").replace("Integrated Speakers ", "")
-        if "Bluetooth Audio (" in cleaned and cleaned.endswith(")"):
-            cleaned = cleaned[len("Bluetooth Audio ("):-1].strip()
-        elif "Bluetooth (" in cleaned and cleaned.endswith(")"):
-            cleaned = cleaned[len("Bluetooth ("):-1].strip()
-        else:
-            if cleaned.endswith(" Audio"):
-                cleaned = cleaned[:-6]
-            cleaned = cleaned.replace("Audio ", "")
-            if "/" in cleaned and ("HDMI" in cleaned or "DisplayPort" in cleaned):
-                parts = [p.strip() for p in cleaned.split("/")]
-                cleaned = parts[-1]
-            if "(" in cleaned and len(cleaned) > 30:
-                cleaned = cleaned.split("(")[0].strip()
+        for prefix in ("Bluetooth Audio (", "Bluetooth ("):
+            if prefix in cleaned and cleaned.endswith(")"):
+                return cleaned[len(prefix):-1].strip()
+        if cleaned.endswith(" Audio"):
+            cleaned = cleaned[:-6]
+        cleaned = cleaned.replace("Audio ", "")
+        if "/" in cleaned and ("HDMI" in cleaned or "DisplayPort" in cleaned):
+            cleaned = cleaned.split("/")[-1].strip()
+        if "(" in cleaned and len(cleaned) > 30:
+            cleaned = cleaned.split("(")[0].strip()
         return cleaned.strip()
 
     def _sync_state(self):
@@ -320,30 +225,27 @@ class SpeakerCard(Gtk.Box):
         else:
             self.add_css_class("channel-card-disabled")
         self._update_delay_badge()
-        self._update_role_button_label()
         self._updating_ui = False
 
     def _on_enable_toggled(self, switch, param):
         if self._updating_ui:
             return
         active = switch.get_active()
+        self.channel._acoustic_role = SpeakerRole.STEREO
         if active:
             self.channel.role = SpeakerRole.STEREO
-            self.channel._acoustic_role = SpeakerRole.STEREO
             self.channel.mute = False
             if self.channel.volume_gain < 0.05:
-                target_gain = 1.0
-                self.channel.volume_gain = target_gain
+                self.channel.volume_gain = 1.0
                 self._updating_ui = True
-                self.vol_scale.set_value(target_gain)
-                self.vol_badge.set_text(f"{int(target_gain * 100)}%")
+                self.vol_scale.set_value(1.0)
+                self.vol_badge.set_text("100%")
                 self._updating_ui = False
             if self.audio_service:
                 self.audio_service.set_speaker_gain(self.channel.sink_name, self.channel.volume_gain, persist=False)
                 if hasattr(self.audio_service, "set_speaker_mute"):
                     self.audio_service.set_speaker_mute(self.channel.sink_name, False)
         else:
-            self.channel._acoustic_role = SpeakerRole.STEREO
             self.channel.role = SpeakerRole.EXCLUDED
             self.channel.mute = True
             if self.audio_service and hasattr(self.audio_service, "set_speaker_mute"):
@@ -356,9 +258,9 @@ class SpeakerCard(Gtk.Box):
 
     def _on_role_clicked(self, new_role: SpeakerRole):
         self.channel.role = new_role
-        if new_role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED):
-            self.channel._acoustic_role = new_role
         is_active = new_role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)
+        if is_active:
+            self.channel._acoustic_role = new_role
         self.channel.mute = not is_active
         self.enable_switch.set_active(is_active)
         if self.audio_service and hasattr(self.audio_service, "set_speaker_mute"):
@@ -375,8 +277,7 @@ class SpeakerCard(Gtk.Box):
         return False
 
     def _on_vol_changed(self, scale):
-        val = scale.get_value()
-        self.channel.volume_gain = round(val, 2)
+        self.channel.volume_gain = round(scale.get_value(), 2)
         self.vol_badge.set_text(f"{int(self.channel.volume_gain * 100)}%")
         if self.audio_service:
             self.audio_service.set_speaker_gain(self.channel.sink_name, self.channel.volume_gain, persist=False)
@@ -391,26 +292,9 @@ class SpeakerCard(Gtk.Box):
 
     def _update_delay_badge(self):
         d = self.channel.delay_ms
-        sign = "+" if d > 0 else ""
-        val_str = f"{sign}{d:.1f}ms" if d != 0.0 else "0.0ms"
-        hw_lat = getattr(self.channel, "hardware_latency_ms", 0.0)
-        if hw_lat > 0:
-            self.delay_badge.set_text(f"{val_str}")
-        else:
-            self.delay_badge.set_text(f"{val_str}")
+        self.delay_badge.set_text(f"{'+' if d > 0 else ''}{d:.1f}ms" if d != 0.0 else "0.0ms")
 
-    def _step_delay(self, delta: float):
-        new_val = max(-5000.0, min(5000.0, round(self.channel.delay_ms + delta, 1)))
-        self.channel.delay_ms = new_val
-        self._updating_ui = True
-        self.delay_scale.set_value(new_val)
-        self._updating_ui = False
-        self._update_delay_badge()
-        if self._delay_debounce_id:
-            GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(400, self._emit_delay_change)
-
-    def _set_manual_delay(self, val: float):
+    def _apply_delay_val(self, val: float, debounce_ms: int = 400):
         new_val = max(-5000.0, min(5000.0, round(val, 1)))
         self.channel.delay_ms = new_val
         self._updating_ui = True
@@ -419,7 +303,25 @@ class SpeakerCard(Gtk.Box):
         self._update_delay_badge()
         if self._delay_debounce_id:
             GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(150, self._emit_delay_change)
+        self._delay_debounce_id = GLib.timeout_add(debounce_ms, self._emit_delay_change)
+
+    def _step_delay(self, delta: float):
+        self._apply_delay_val(self.channel.delay_ms + delta, 400)
+
+    def _set_manual_delay(self, val: float):
+        self._apply_delay_val(val, 150)
+
+    def _reset_delay(self):
+        self._apply_delay_val(0.0, 400)
+
+    def _on_delay_changed(self, scale):
+        if not self._updating_ui:
+            self._apply_delay_val(scale.get_value(), 400)
+
+    def _emit_delay_change(self):
+        self._delay_debounce_id = 0
+        self.on_change()
+        return False
 
     def _setup_delay_popover(self):
         self.delay_popover = Gtk.Popover()
@@ -428,44 +330,38 @@ class SpeakerCard(Gtk.Box):
         self.btn_delay_opts.connect("clicked", lambda b: self.delay_popover.popup())
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        content.set_margin_top(12)
-        content.set_margin_bottom(12)
-        content.set_margin_start(12)
-        content.set_margin_end(12)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(content, f"set_margin_{m}")(12)
         content.set_size_request(280, -1)
 
-        pop_title = Gtk.Label(label="Set Delay & Calibration")
+        pop_title = Gtk.Label(label="Delay, Polarity & Calibration")
         pop_title.add_css_class("heading")
         pop_title.set_halign(Gtk.Align.START)
         content.append(pop_title)
 
         hw_name = self.channel.display_name or self.channel.sink_name
         hw_lat = getattr(self.channel, "hardware_latency_ms", 0.0)
-        hw_info = f"Hardware: {self._short_name(hw_name)}"
-        if hw_lat > 0.0:
-            hw_info += f" (HW buffer: {hw_lat:.0f} ms)"
+        hw_info = f"Hardware: {self._short_name(hw_name)}" + (f" (HW buffer: {hw_lat:.0f} ms)" if hw_lat > 0.0 else "")
         hw_label = Gtk.Label(label=hw_info)
         hw_label.add_css_class("dim-label")
         hw_label.set_ellipsize(3)
         hw_label.set_halign(Gtk.Align.START)
         content.append(hw_label)
 
-        # 1. Manual delay entry
+        # Manual delay entry
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         lbl_in = Gtk.Label(label="Delay (ms):")
         lbl_in.set_halign(Gtk.Align.START)
         input_box.append(lbl_in)
 
         self.delay_num_entry = Gtk.Entry()
-        self.delay_num_entry.set_placeholder_text("e.g. -2300.0 or +150.0")
+        self.delay_num_entry.set_placeholder_text("e.g. -170.0 or +50.0")
         self.delay_num_entry.set_hexpand(True)
         self.delay_num_entry.set_text(f"{self.channel.delay_ms:.1f}")
 
-        def _on_apply_entry(*args):
-            text = self.delay_num_entry.get_text().strip()
+        def _on_apply_entry(*_args):
             try:
-                val = float(text)
-                self._set_manual_delay(val)
+                self._set_manual_delay(float(self.delay_num_entry.get_text().strip()))
                 self.delay_popover.popdown()
             except ValueError:
                 self.delay_num_entry.add_css_class("error")
@@ -474,7 +370,6 @@ class SpeakerCard(Gtk.Box):
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.add_css_class("suggested-action")
         apply_btn.connect("clicked", _on_apply_entry)
-
         input_box.append(self.delay_num_entry)
         input_box.append(apply_btn)
         content.append(input_box)
@@ -505,10 +400,9 @@ class SpeakerCard(Gtk.Box):
         phase_row.append(self.phase_switch)
         content.append(phase_row)
 
-        # Delay guide
         delay_tip = Gtk.Label(
-            label="💡 Negative (e.g. -2300ms): delays all other speakers to align with this device (Echo/Alexa/BT).\n"
-                  "💡 Positive (e.g. +150ms): delays only this individual speaker."
+            label="💡 Negative delay holds back all other speakers to align with a lagging device.\n"
+                  "💡 Positive delay holds back only this individual speaker."
         )
         delay_tip.add_css_class("dim-label")
         delay_tip.set_wrap(True)
@@ -516,47 +410,10 @@ class SpeakerCard(Gtk.Box):
         delay_tip.set_halign(Gtk.Align.START)
         content.append(delay_tip)
 
-        # 2. Quick Presets
-        preset_lbl = Gtk.Label(label="Quick Presets:")
-        preset_lbl.add_css_class("dim-label")
-        preset_lbl.set_halign(Gtk.Align.START)
-        content.append(preset_lbl)
-
-        preset_grid = Gtk.Grid()
-        preset_grid.set_column_spacing(6)
-        preset_grid.set_row_spacing(6)
-        preset_grid.set_halign(Gtk.Align.FILL)
-
-        presets = [
-            ("0 ms (Reset)", 0.0),
-            ("-1710 ms (Amazon Echo Dot)", -1710.0),
-            ("-2300 ms (Alexa / Echo max)", -2300.0),
-            ("-1000 ms (Delay others 1s)", -1000.0),
-            ("-500 ms (Delay others 0.5s)", -500.0),
-            ("+150 ms (Standard BT)", 150.0),
-        ]
-        for idx, (lbl, p_val) in enumerate(presets):
-            p_btn = Gtk.Button(label=lbl)
-            p_btn.add_css_class("flat")
-            def _make_p_handler(val):
-                def _h(b):
-                    self.delay_num_entry.set_text(f"{val:.1f}")
-                    self._set_manual_delay(val)
-                    self.delay_popover.popdown()
-                return _h
-            p_btn.connect("clicked", _make_p_handler(p_val))
-            row = idx // 2
-            col = idx % 2
-            preset_grid.attach(p_btn, col, row, 1, 1)
-
-        content.append(preset_grid)
-
-        # Separator
         content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # 3. Automatic Acoustic Calibration
+        # Single-channel Acoustic Calibration
         calib_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-
         calib_title = Gtk.Label(label="Automatic Acoustic Calibration")
         calib_title.add_css_class("heading")
         calib_title.set_halign(Gtk.Align.START)
@@ -574,7 +431,6 @@ class SpeakerCard(Gtk.Box):
         self.btn_run_calib.connect("clicked", self._on_start_acoustic_calibration)
         calib_box.append(self.btn_run_calib)
 
-        # Status / Spinner box
         self.calib_status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.calib_status_box.set_visible(False)
         self.calib_spinner = Gtk.Spinner()
@@ -585,7 +441,6 @@ class SpeakerCard(Gtk.Box):
         self.calib_status_box.append(self.calib_status_lbl)
         calib_box.append(self.calib_status_box)
 
-        # Result box
         self.calib_result_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.calib_result_box.set_visible(False)
         self.calib_result_lbl = Gtk.Label(label="")
@@ -610,13 +465,10 @@ class SpeakerCard(Gtk.Box):
         self.calib_result_box.set_visible(False)
         self.calib_status_lbl.set_text("Preparing calibration signals...")
 
-        def _progress(msg):
-            GLib.idle_add(self.calib_status_lbl.set_text, msg)
-
         def _worker():
             delay_res, err = self.audio_service.measure_acoustic_delay(
                 target_sink=self.channel.sink_name,
-                progress_cb=_progress
+                progress_cb=lambda msg: GLib.idle_add(self.calib_status_lbl.set_text, msg)
             )
             def _finish():
                 self.calib_spinner.stop()
@@ -624,62 +476,30 @@ class SpeakerCard(Gtk.Box):
                 if err or delay_res is None:
                     self.calib_status_box.set_visible(True)
                     self.calib_status_lbl.set_text(f"⚠️ {err or 'Error during calibration'}")
+                    return
+                self.calib_status_box.set_visible(False)
+                self.calib_result_box.set_visible(True)
+                if delay_res < 0:
+                    self.calib_result_lbl.set_text(f"Lagging device: {abs(delay_res):.1f}ms\nCompensation: {delay_res:.1f}ms")
+                elif delay_res > 0:
+                    self.calib_result_lbl.set_text(f"Leading device: {delay_res:.1f}ms\nCompensation: +{delay_res:.1f}ms")
                 else:
-                    self.calib_status_box.set_visible(False)
-                    self.calib_result_box.set_visible(True)
-                    if delay_res < 0:
-                        self.calib_result_lbl.set_text(
-                            f"Lagging device: {abs(delay_res):.1f}ms\n"
-                            f"Compensation: {delay_res:.1f}ms (delays other speakers)"
-                        )
-                    elif delay_res > 0:
-                        self.calib_result_lbl.set_text(
-                            f"Leading device: {delay_res:.1f}ms\n"
-                            f"Compensation: +{delay_res:.1f}ms on this speaker"
-                        )
-                    else:
-                        self.calib_result_lbl.set_text("Speakers perfectly synchronized (0.0ms)")
+                    self.calib_result_lbl.set_text("Speakers perfectly synchronized (0.0ms)")
 
-                    def _apply_calib(b):
-                        self.delay_num_entry.set_text(f"{delay_res:.1f}")
-                        self._set_manual_delay(delay_res)
-                        self.delay_popover.popdown()
-
-                    if hasattr(self, "_calib_apply_handler_id") and self._calib_apply_handler_id:
-                        try:
-                            self.btn_apply_calib.disconnect(self._calib_apply_handler_id)
-                        except Exception:
-                            pass
-                    self._calib_apply_handler_id = self.btn_apply_calib.connect("clicked", _apply_calib)
+                if self._calib_apply_handler_id:
+                    try:
+                        self.btn_apply_calib.disconnect(self._calib_apply_handler_id)
+                    except Exception:
+                        pass
+                def _apply_calib(_b):
+                    self.delay_num_entry.set_text(f"{delay_res:.1f}")
+                    self._set_manual_delay(delay_res)
+                    self.delay_popover.popdown()
+                self._calib_apply_handler_id = self.btn_apply_calib.connect("clicked", _apply_calib)
 
             GLib.idle_add(_finish)
 
         threading.Thread(target=_worker, daemon=True).start()
-
-    def _reset_delay(self):
-        self.channel.delay_ms = 0.0
-        self._updating_ui = True
-        self.delay_scale.set_value(0.0)
-        self._updating_ui = False
-        self._update_delay_badge()
-        if self._delay_debounce_id:
-            GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(400, self._emit_delay_change)
-
-    def _on_delay_changed(self, scale):
-        if self._updating_ui:
-            return
-        val = scale.get_value()
-        self.channel.delay_ms = round(val, 1)
-        self._update_delay_badge()
-        if self._delay_debounce_id:
-            GLib.source_remove(self._delay_debounce_id)
-        self._delay_debounce_id = GLib.timeout_add(400, self._emit_delay_change)
-
-    def _emit_delay_change(self):
-        self._delay_debounce_id = 0
-        self.on_change()
-        return False
 
     def _setup_rename_popover(self):
         self.popover = Gtk.Popover()
@@ -688,10 +508,8 @@ class SpeakerCard(Gtk.Box):
         self.edit_btn.get_popover = lambda: self.popover
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        content.set_margin_top(12)
-        content.set_margin_bottom(12)
-        content.set_margin_start(12)
-        content.set_margin_end(12)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(content, f"set_margin_{m}")(12)
         content.set_size_request(240, -1)
 
         pop_title = Gtk.Label(label="Customize Label")
@@ -732,22 +550,15 @@ class SpeakerCard(Gtk.Box):
         self.popover.connect("show", self._on_popover_show)
 
     def _on_popover_show(self, popover):
-        if self.channel.custom_name:
-            self.name_entry.set_text(self.channel.custom_name)
-        else:
-            self.name_entry.set_text("")
+        self.name_entry.set_text(self.channel.custom_name or "")
         self.name_entry.grab_focus()
 
     def _get_display_title(self) -> str:
-        if self.channel.custom_name:
-            return self.channel.custom_name
-        return self._short_name(self.channel.display_name or self.channel.sink_name)
+        return self.channel.custom_name or self._short_name(self.channel.display_name or self.channel.sink_name)
 
     def _get_title_tooltip(self) -> str:
         hw_name = self.channel.display_name or self.channel.sink_name
-        if self.channel.custom_name:
-            return f"{self.channel.custom_name}\n(Device: {hw_name})"
-        return hw_name
+        return f"{self.channel.custom_name}\n(Device: {hw_name})" if self.channel.custom_name else hw_name
 
     def _on_save_custom_name(self, popover):
         text = self.name_entry.get_text().strip()
@@ -758,7 +569,6 @@ class SpeakerCard(Gtk.Box):
         else:
             self.channel.custom_name = None
             self.title_label.remove_css_class("strip-title-custom")
-
         self.title_label.set_text(self._get_display_title())
         self.title_label.set_tooltip_text(self._get_title_tooltip())
         popover.popdown()

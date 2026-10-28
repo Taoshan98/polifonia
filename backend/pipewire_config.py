@@ -1,8 +1,6 @@
 """Generates PipeWire filter-chain and combine-sink SPA configuration files."""
 
-import os
-from typing import Dict, Any, List
-from core.models import SystemConfig, SpeakerRole, SpeakerConfig
+from core.models import SpeakerConfig, SpeakerRole, SystemConfig
 
 
 class PipeWireConfigGenerator:
@@ -15,124 +13,82 @@ class PipeWireConfigGenerator:
 
     @staticmethod
     def build_config(system_config: SystemConfig) -> str:
-        """
-        Builds a PipeWire filter-chain configuration for 2.1 acoustic routing,
-        delay compensation, crossover filtering, and gain control.
-        """
+        """Builds a PipeWire filter-chain configuration for acoustic routing, delay, crossover, and gain."""
         raw_speakers = system_config.speakers
-        if isinstance(raw_speakers, dict):
-            speaker_list = list(raw_speakers.values())
-        else:
-            speaker_list = list(raw_speakers)
+        speaker_list = list(raw_speakers.values()) if isinstance(raw_speakers, dict) else list(raw_speakers)
 
         active_channels = []
         for s in speaker_list:
             if isinstance(s, dict):
-                role_val = s.get("role", "excluded")
-                try:
-                    role = SpeakerRole(role_val)
-                except ValueError:
-                    role = SpeakerRole.EXCLUDED
-                if role != SpeakerRole.EXCLUDED:
-                    active_channels.append(SpeakerConfig(
-                        sink_id=s["sink_id"],
-                        sink_name=s["sink_name"],
-                        display_name=s.get("display_name", s.get("sink_description", "")),
-                        role=role,
-                        delay_ms=float(s.get("delay_ms", 0.0)),
-                        volume_gain=float(s.get("volume_gain", s.get("gain", 1.0))),
-                        phase_inverted=bool(s.get("phase_inverted", s.get("phase_invert", False)))
-                    ))
+                spk = SpeakerConfig.from_dict(s)
+                if spk.role != SpeakerRole.EXCLUDED:
+                    active_channels.append(spk)
             elif hasattr(s, "role") and s.role != SpeakerRole.EXCLUDED:
                 active_channels.append(s)
 
+        node_lines = [
+            '                    { type = builtin label = copy name = input_FL }',
+            '                    { type = builtin label = copy name = input_FR }',
+        ]
+        link_lines = []
+
+        sat_roles = (SpeakerRole.LEFT, SpeakerRole.RIGHT, SpeakerRole.SURROUND_LEFT, SpeakerRole.SURROUND_RIGHT)
+        for ch in active_channels:
+            gain_val = ch.volume_gain * system_config.master_volume
+            if getattr(ch, "phase_inverted", False):
+                gain_val = -gain_val
+            delay_sec = max(0.0, ch.delay_ms) / 1000.0
+
+            if ch.role == SpeakerRole.SUBWOOFER and system_config.crossover_enabled:
+                f_def = f'type = builtin label = bq_lowpass control = {{ "Freq" = {system_config.crossover_freq} "Q" = 0.707 }}'
+            elif ch.role in sat_roles and system_config.crossover_enabled:
+                f_def = f'type = builtin label = bq_highpass control = {{ "Freq" = {system_config.crossover_freq} "Q" = 0.707 }}'
+            else:
+                f_def = 'type = builtin label = copy'
+
+            node_lines.append(f"                    # Filter chain for Sink {ch.sink_id} ({ch.role.value})")
+            node_lines.append(f'                    {{ {f_def} name = filter_{ch.sink_id} }}')
+
+            if ch.role in (SpeakerRole.LEFT, SpeakerRole.SURROUND_LEFT):
+                link_lines.append(f'                    {{ output = "input_FL:Out" input = "filter_{ch.sink_id}:In" }}')
+            elif ch.role in (SpeakerRole.RIGHT, SpeakerRole.SURROUND_RIGHT):
+                link_lines.append(f'                    {{ output = "input_FR:Out" input = "filter_{ch.sink_id}:In" }}')
+            else:
+                link_lines.append(f'                    {{ output = "input_FL:Out" input = "filter_{ch.sink_id}:In" }}')
+                link_lines.append(f'                    {{ output = "input_FR:Out" input = "filter_{ch.sink_id}:In" }}')
+
+            prev_node = f"filter_{ch.sink_id}"
+            if delay_sec > 0.0:
+                node_lines.append(f'                    {{ type = builtin label = delay name = delay_{ch.sink_id} config = {{ "max-delay" = 5.0 }} control = {{ "Delay (s)" = {delay_sec:.4f} }} }}')
+                link_lines.append(f'                    {{ output = "{prev_node}:Out" input = "delay_{ch.sink_id}:In" }}')
+                prev_node = f"delay_{ch.sink_id}"
+            if abs(gain_val - 1.0) > 0.001:
+                node_lines.append(f'                    {{ type = builtin label = linear name = gain_{ch.sink_id} control = {{ "Mult" = {gain_val:.4f} "Add" = 0.0 }} }}')
+                link_lines.append(f'                    {{ output = "{prev_node}:Out" input = "gain_{ch.sink_id}:In" }}')
+
         lines = [
             "# Auto-generated by Polifonia Audio Studio",
-            "context.properties = {",
-            "    log.level = 0",
-            "}",
-            "",
+            "context.properties = { log.level = 0 }",
             "context.spa-libs = {",
             "    audio.convert.* = audioconvert/libspa-audioconvert",
             "    filter.graph    = filter-chain/libspa-filter-graph",
             "}",
-            "",
             "context.modules = [",
             "    { name = libpipewire-module-filter-chain",
             "        args = {",
             '            node.description = "Polifonia Unison Master"',
             '            media.name       = "Polifonia Unison Master"',
             "            filter.graph = {",
-            "                nodes = ["
-        ]
-
-        # 1. Add Input Splitter Nodes (one per input channel)
-        lines.append('                    { type = builtin label = copy name = input_FL }')
-        lines.append('                    { type = builtin label = copy name = input_FR }')
-
-        # 2. Add Filter, Delay, and Gain/Polarity Nodes for each active channel
-        for ch in active_channels:
-            gain_val = ch.volume_gain * system_config.master_volume
-            if getattr(ch, "phase_inverted", False):
-                gain_val = -gain_val
-            delay_sec = max(0.0, ch.delay_ms) / 1000.0
-
-            # Crossover logic
-            if ch.role == SpeakerRole.SUBWOOFER and system_config.crossover_enabled:
-                # Low-pass filter (Butterworth 2nd order)
-                filter_def = f'type = builtin label = bq_lowpass control = {{ "Freq" = {system_config.crossover_freq} "Q" = 0.707 }}'
-            elif (ch.role in (SpeakerRole.LEFT, SpeakerRole.RIGHT, SpeakerRole.SURROUND_LEFT, SpeakerRole.SURROUND_RIGHT)) and system_config.crossover_enabled:
-                # High-pass filter (Butterworth 2nd order)
-                filter_def = f'type = builtin label = bq_highpass control = {{ "Freq" = {system_config.crossover_freq} "Q" = 0.707 }}'
-            else:
-                # Passthrough / Flat
-                filter_def = 'type = builtin label = copy'
-
-            lines.append(f"                    # Filter chain for Sink {ch.sink_id} ({ch.role.value})")
-            lines.append(f'                    {{ {filter_def} name = filter_{ch.sink_id} }}')
-            if delay_sec > 0.0:
-                lines.append(f'                    {{ type = builtin label = delay name = delay_{ch.sink_id} config = {{ "max-delay" = 5.0 }} control = {{ "Delay (s)" = {delay_sec:.4f} }} }}')
-            if abs(gain_val - 1.0) > 0.001:
-                lines.append(f'                    {{ type = builtin label = linear name = gain_{ch.sink_id} control = {{ "Mult" = {gain_val:.4f} "Add" = 0.0 }} }}')
-
-        lines.extend([
+            "                nodes = [",
+            *node_lines,
             "                ]",
-            "                links = ["
-        ])
-
-        # 3. Add Links from Input Splitters to Filters (and optional Delay/Gain stages)
-        for ch in active_channels:
-            gain_val = ch.volume_gain * system_config.master_volume
-            if getattr(ch, "phase_inverted", False):
-                gain_val = -gain_val
-            delay_sec = max(0.0, ch.delay_ms) / 1000.0
-
-            # Route left or right input channel to appropriate filter
-            if ch.role in (SpeakerRole.LEFT, SpeakerRole.SURROUND_LEFT):
-                lines.append(f'                    {{ output = "input_FL:Out" input = "filter_{ch.sink_id}:In" }}')
-            elif ch.role in (SpeakerRole.RIGHT, SpeakerRole.SURROUND_RIGHT):
-                lines.append(f'                    {{ output = "input_FR:Out" input = "filter_{ch.sink_id}:In" }}')
-            else:
-                # Stereo, Center, Subwoofer: receive both channels
-                lines.append(f'                    {{ output = "input_FL:Out" input = "filter_{ch.sink_id}:In" }}')
-                lines.append(f'                    {{ output = "input_FR:Out" input = "filter_{ch.sink_id}:In" }}')
-
-            prev_node = f"filter_{ch.sink_id}"
-            if delay_sec > 0.0:
-                lines.append(f'                    {{ output = "{prev_node}:Out" input = "delay_{ch.sink_id}:In" }}')
-                prev_node = f"delay_{ch.sink_id}"
-            if abs(gain_val - 1.0) > 0.001:
-                lines.append(f'                    {{ output = "{prev_node}:Out" input = "gain_{ch.sink_id}:In" }}')
-
-        lines.extend([
+            "                links = [",
+            *link_lines,
             "                ]",
-            "                inputs  = [",
-            '                    "input_FL:In"',
-            '                    "input_FR:In"',
-            "                ];",
+            '                inputs  = [ "input_FL:In" "input_FR:In" ];',
             "            }",
             "            audio.channels = 2",
-            '            audio.position = [ FL FR ]',
+            "            audio.position = [ FL FR ]",
             "            capture.props = {",
             '                node.name      = "polifonia_sink"',
             '                media.class    = "Audio/Sink"',
@@ -142,53 +98,22 @@ class PipeWireConfigGenerator:
             "            }",
             "        }",
             "    }",
-            "]"
-        ])
-
+            "]",
+        ]
         return "\n".join(lines)
 
     @staticmethod
     def build_combine_script(system_config: SystemConfig) -> str:
-        """
-        Creates a runtime routing script using pw-loopback / filter-chain module
-        that can be started as a standalone background process.
-        """
-        active_channels = [c for c in system_config.channels if c.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
-        
-        # Generates a clean python runner script for dynamic management
+        """Creates a standalone python runner script for active loopback nodes."""
+        active = [c for c in system_config.channels if c.role not in (SpeakerRole.EXCLUDED, SpeakerRole.DISABLED)]
         lines = [
             "#!/usr/bin/env python3",
-            "import subprocess",
-            "import time",
-            "import sys",
-            "import signal",
-            "",
+            "import signal, subprocess, sys, time",
             "processes = []",
-            "",
-            "def cleanup(sig, frame):",
-            "    for p in processes:",
-            "        p.terminate()",
-            "    sys.exit(0)",
-            "",
-            "signal.signal(signal.SIGINT, cleanup)",
-            "signal.signal(signal.SIGTERM, cleanup)",
-            "",
-            "# Launch Loopbacks / Filter-chains for assigned sinks",
+            "signal.signal(signal.SIGINT, lambda s, f: ([p.terminate() for p in processes], sys.exit(0)))",
+            "signal.signal(signal.SIGTERM, lambda s, f: ([p.terminate() for p in processes], sys.exit(0)))",
         ]
-
-        for ch in active_channels:
-            pos = "FL" if ch.role == SpeakerRole.LEFT else ("FR" if ch.role == SpeakerRole.RIGHT else "MONO")
-            gain_pct = int(ch.volume_gain * 100)
-            delay_samples = int(ch.delay_ms * 48) # 48kHz assumption for delay compensation
-            desc = ch.display_name or ch.sink_name
-            
-            lines.append(f"# Route for {desc} ({ch.role.value})")
-            lines.append(f'p = subprocess.Popen(["pw-loopback", "--capture-props=media.class=Audio/Sink node.name=polifonia_sink_{ch.sink_id}", f"--target-object={ch.sink_id}"])')
-            lines.append("processes.append(p)")
-
-        lines.append("")
-        lines.append("while True:")
-        lines.append("    time.sleep(1)")
-
+        for ch in active:
+            lines.append(f'processes.append(subprocess.Popen(["pw-loopback", "--capture-props=media.class=Audio/Sink node.name=polifonia_sink_{ch.sink_id}", "--target-object={ch.sink_id}"]))')
+        lines.extend(["while True:", "    time.sleep(1)"])
         return "\n".join(lines)
-
