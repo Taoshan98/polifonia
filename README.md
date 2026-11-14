@@ -11,13 +11,13 @@
 <p align="center">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://pipewire.org"><img src="https://img.shields.io/badge/Platform-Linux%20%28PipeWire%29-orange.svg" alt="Platform: Linux PipeWire"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg" alt="Python 3.10+"></a>
-  <a href="#packaging--distribution"><img src="https://img.shields.io/badge/Packages-Flatpak%20%7C%20AppImage-purple.svg" alt="Packages"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-Native%20v2.0-f74c00.svg" alt="Rust Native v2.0"></a>
+  <a href="#packaging--distribution"><img src="https://img.shields.io/badge/Desktop-X11%20%7C%20Wayland%20%7C%20Any%20DE-purple.svg" alt="Cross-Desktop"></a>
 </p>
 
 ---
 
-**Polifonia Audio Studio** is an advanced, PipeWire-native multi-speaker audio compositing, synchronization, and acoustic DSP management system for the Linux desktop (compatible with **GNOME**, **KDE Plasma**, **XFCE**, **Cinnamon**, **Hyprland**, and **Sway**).
+**Polifonia Audio Studio** is an ultra-lightweight, native **Rust** multi-speaker audio compositing, synchronization, and acoustic DSP control studio for Linux **PipeWire** — compiled into a **single standalone binary** with zero Python, GTK, Qt, or Libadwaita runtime dependencies (working seamlessly on **KDE Plasma**, **GNOME**, **XFCE**, **Cinnamon**, **Hyprland**, **Sway**, and minimal window managers over X11 or Wayland).
 
 It enables workstations with heterogeneous audio topologies — **HDMI / DisplayPort** integrated monitor speakers, **USB DACs**, **S/PDIF optical** receivers, **PCIe / Analog Jacks**, **Bluetooth A2DP** speakers (SBC, AAC, aptX, LDAC), **Smart Speakers** with proprietary internal DSP buffers (e.g. Amazon Echo, HomePod), and **Network / AirPlay / RAOP** endpoints — to operate simultaneously as a single, phase-coherent, sample-aligned **Multichannel Virtual Soundstage** (`polifonia_master`).
 
@@ -62,34 +62,23 @@ Polifonia solves these challenges using a **100% hardware-agnostic, zero-hardcod
 
 ## Architecture & System Design
 
+Polifonia v2.0 is implemented as a compact, single-process native Rust application with an `eframe`/`egui` GPU-accelerated Studio UI, an integrated DBus StatusNotifier (`ksni`) system tray, and single-precision `rustfft` acoustic system identification:
+
 ```
 polifonia/
-├── backend/
-│   ├── pipewire_config.py     # SPA filter-chain, LR4 crossover & delay graph generator
-│   └── pipewire_scanner.py    # Dynamic ELD/EDID, USB/SPDIF, Bluetooth & SPA latency scanner
-├── core/
-│   └── models.py              # Strongly-typed domain data models (AudioSink, SpeakerConfig, SpeakerRole)
-├── services/
-│   ├── audio_engine.py        # Real-time Unison supervisor, watchdog & closed-loop acoustic calibration
-│   └── audio_service.py       # Service provider interface alias
-├── storage/
-│   ├── preset_manager.py      # Named profile management proxy
-│   └── settings_store.py      # XDG-compliant JSON persistence (~/.config/polifonia/)
-├── ui/
-│   ├── styles/
-│   │   └── studio_theme.css   # Custom cross-desktop dark studio CSS theme
-│   ├── views/
-│   │   ├── main_window.py     # Main studio window, header bar & view stack
-│   │   ├── routing_graph.py   # Interactive Cairo node-graph & real-time telemetry view
-│   │   └── speaker_card.py    # Per-speaker channel strip, role matrix & calibration popover
-│   └── tray/
-│       ├── tray_service.py    # Background tray lifecycle manager
-│       └── tray_indicator.py  # System tray indicator process
+├── src/
+│   ├── main.rs        # Entrypoint, POSIX signal hooks, tray command dispatcher & eframe runner
+│   ├── models.rs      # Strongly-typed domain models (AudioSink, SpeakerConfig, SpeakerRole, SystemConfig)
+│   ├── storage.rs     # Atomic XDG JSON profile store (~/.config/polifonia/current.json)
+│   ├── scanner.rs     # ELD/EDID display resolver, IEC958 unlocker & PipeWire pw-dump/pactl scanner
+│   ├── engine.rs      # Unison pw-loopback supervisor, drift watchdog & Hilbert Auto-Sync DSP engine
+│   ├── tray.rs        # Embedded DBus StatusNotifierItem (ksni) tray menu & synthesized ARGB32 icon
+│   └── ui.rs          # Studio Dark eframe/egui Mixer Console & Signal Flow topology canvas
+├── assets/            # Desktop & SVG application icons
 ├── docs/
 │   └── ALGORITHMS_AND_ARCHITECTURE.md  # Full mathematical & algorithmic specification
-├── tests/                     # 80-test unit & integration suite
-├── packaging/                 # Flatpak, AppImage, Debian (.deb) & RPM specs
-├── main.py                    # Application entrypoint
+├── packaging/         # Flatpak, AppImage, Debian (.deb) & RPM specs
+├── Cargo.toml         # Rust crate configuration & LTO release profile
 └── README.md
 ```
 
@@ -106,7 +95,7 @@ polifonia/
   - Modifying the delay or phase of one speaker restarts **only** the affected `pw-loopback` branch, leaving all other speakers playing without a single dropped sample.
 
 ### 3. Interactive Live Routing Graph & Studio UI
-- **Channel Rack & Live Cairo Routing Graph**: Visualizes active application streams (`sink-inputs`) flowing into `polifonia_master` and branching out to each physical speaker with real-time hardware latency, auto-delay compensation, user/calibrated offset, and total buffer metrics.
+- **Mixer Console & Signal Flow Canvas**: Renders live active application streams (`sink-inputs`) flowing into `polifonia_master` and branching out to each physical speaker with real-time hardware latency, auto-delay compensation, manual offset, and hover telemetry, with 30 FPS throttled animation strictly confined to when Signal Flow is visible and active (`0%` idle redraw cost).
 
 ---
 
@@ -196,32 +185,32 @@ $$m_{\text{exact}} = m_0 + \frac{1}{2}\frac{E[m_0 - 1] - E[m_0 + 1]}{E[m_0 - 1] 
 
 ## Installation & Quick Start
 
-### Prerequisites
-- Linux Kernel 5.15+
-- PipeWire 0.3.50+ with `pipewire-pulse`, `pipewire-bin` (`pw-loopback`, `pw-play`, `pw-record`, `pw-dump`), and `wireplumber` (`wpctl`)
-- Python 3.10+ with `python3-gi` (GTK4 / Libadwaita bindings) and `python3-numpy`
+### Runtime Prerequisites (for running the prebuilt binary)
+- Linux Kernel 5.15+ (X11 or Wayland)
+- PipeWire 0.3.50+ with `pipewire-pulse`, `pipewire-bin` (`pw-loopback`, `pw-play`, `pw-record`, `pw-dump`), and `wireplumber` (`wpctl`, `pactl`)
 
 ```bash
-# Debian / Ubuntu
-sudo apt install python3-gi python3-numpy gir1.2-gtk-4.0 gir1.2-adw-1 pipewire pipewire-pulse pipewire-bin wireplumber pulseaudio-utils
+# Debian / Ubuntu runtime audio tools (no Python or GTK needed)
+sudo apt install pipewire pipewire-pulse pipewire-bin wireplumber pulseaudio-utils
 
 # Fedora / RHEL
-sudo dnf install python3-gobject python3-numpy gtk4 libadwaita pipewire pipewire-pulseaudio pipewire-utils wireplumber pulseaudio-utils
+sudo dnf install pipewire pipewire-pulseaudio pipewire-utils wireplumber pulseaudio-utils
 
 # Arch Linux
-sudo pacman -S python-gobject python-numpy gtk4 libadwaita pipewire pipewire-pulse wireplumber libpulse
+sudo pacman -S pipewire pipewire-pulse wireplumber libpulse
 ```
 
-### Running from Source
+### Building & Running from Source (Rust 1.75+)
 ```bash
 git clone https://github.com/Taoshan98/polifonia.git
 cd polifonia
-python3 main.py
+cargo build --release
+./target/release/polifonia
 ```
 
-### Installing via pip
+You can also install the single standalone binary directly into `~/.local/bin` or `/usr/local/bin`:
 ```bash
-pip install .
+cargo install --path .
 polifonia
 ```
 
@@ -270,9 +259,9 @@ Native package specifications (`packaging/aur/`, `packaging/debian/`, `packaging
 
 ## Running Automated Tests
 
-Run the complete **80-test** automated unit and integration suite:
+Run the native Rust unit and DSP verification suite:
 ```bash
-python3 -m unittest discover -s tests -v
+cargo test
 ```
 
 ---

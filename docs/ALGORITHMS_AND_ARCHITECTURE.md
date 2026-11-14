@@ -36,7 +36,7 @@ $$\tau_{\text{tot},1} = \tau_{\text{tot},2} = \dots = \tau_{\text{tot},N} = T_{\
 ## 3. Level 1: PipeWire SPA Telemetry & Dynamic Differential Compensation
 
 ### 3.1 Extraction of `Latency` and `ProcessLatency`
-In [`backend/pipewire_scanner.py`](../backend/pipewire_scanner.py), `PipeWireScanner.scan_sinks` inspects the live PipeWire graph via `pw-dump` and extracts both SPA parameter dictionaries (`Props` and `Params`) for each `Audio/Sink` node:
+In [`src/scanner.rs`](../src/scanner.rs), `DeviceScanner::scan_sinks` inspects the live PipeWire graph via `pw-dump` and extracts both SPA parameter dictionaries (`Props` and `Params`) for each `Audio/Sink` node:
 - `Latency`: The nanosecond transport range $[\text{minNs}, \text{maxNs}]$ negotiated by the ALSA/USB kernel driver or reported by the BlueZ stack via AVDTP Delay Reporting.
 - `ProcessLatency`: Internal node processing latency in nanoseconds ($\text{ns}$).
 
@@ -47,7 +47,7 @@ $$\tau_{\text{hw},i} = \frac{\frac{1}{2}(\text{minNs}_i + \text{maxNs}_i) + \tex
 If a Bluetooth A2DP sink is temporarily in an `IDLE`/`SUSPENDED` state and has not yet populated live `minNs`/`maxNs` counters, the scanner estimates baseline transport latency from the negotiated `api.bluez5.codec` property (`aptX LL` $40\text{ ms}$, `FastStream` $55\text{ ms}$, `LC3` $60\text{ ms}$, `aptX`/`aptX-HD` $130\text{ ms}$, `SBC-XQ` $150\text{ ms}$, `SBC` $160\text{ ms}$, `AAC` $180\text{ ms}$, `LDAC` $200\text{ ms}$), automatically replacing the estimate with live AVDTP telemetry as soon as the stream transitions to `RUNNING`.
 
 ### 3.2 Non-Negative Differential Compensation Matrix
-In [`services/audio_engine.py`](../services/audio_engine.py) (`AudioEngineService.sync_active_branches`), given the hardware latency vector $[\tau_{\text{hw},1}, \dots, \tau_{\text{hw},N}]$ and the acoustic/user calibration vector $[\delta_1, \dots, \delta_N]$, the engine computes:
+In [`src/engine.rs`](../src/engine.rs) (`AudioEngineService::sync_active_branches`), given the hardware latency vector $[\tau_{\text{hw},1}, \dots, \tau_{\text{hw},N}]$ and the acoustic/user calibration vector $[\delta_1, \dots, \delta_N]$, the engine computes:
 
 $$\tau_{\text{hw},\max} = \max_{j \in \{1 \dots N\}} \tau_{\text{hw},j}, \qquad \delta_{\min} = \min_{j \in \{1 \dots N\}} \delta_j$$
 
@@ -60,7 +60,7 @@ $$D_i = \underbrace{(\tau_{\text{hw},\max} - \tau_{\text{hw},i})}_{\text{Level 1
 - **Property 2 (Unreported DSP Compensation)**: If speaker $k$ has an unreported internal DSP buffer $\tau_{\text{dsp},k} > 0$, setting $\delta_k = -\tau_{\text{dsp},k}$ yields $\delta_{\min} = -\tau_{\text{dsp},k}$, which keeps $D_k$ minimal while advancing all other $N-1$ faster speakers by $+\tau_{\text{dsp},k}$.
 
 ### 3.3 Real-Time Drift Watchdog
-The background supervisor thread `_start_watchdog` in [`services/audio_engine.py`](../services/audio_engine.py) polls process health and live PipeWire SPA telemetry every $2\text{ s}$:
+The background supervisor thread (`watchdog` loop in [`src/engine.rs`](../src/engine.rs)) polls process health and live PipeWire SPA telemetry every $3\text{ s}$:
 - Any crashed `pw-loopback` process is respawned immediately.
 - If any active sink's reported hardware latency drifts by more than $25.0\text{ ms}$ (e.g., dynamic A2DP buffer resizing or transport re-negotiation), the engine recomputes $D_i$ and updates only the affected branches without interrupting unaffected speakers.
 
@@ -108,7 +108,7 @@ $$R_{ys}[m] = \sum_{n=0}^{M-1} \tilde{y}[n + m] \, \tilde{s}[n]$$
 contains carrier oscillations at $\sim 2.35\text{ kHz}$. If a speaker's internal crossover filter, bass-reflex port, or acoustic reflection rotates the carrier phase by $\phi = 90^\circ$ (quadrature), $|R_{ys}[m]|$ exhibits a **local null (zero-crossing)** at the true group-delay peak $m_0$, causing peak-picking errors or sidelobe locking.
 
 ### 5.2 $O(L \log L)$ Frequency-Domain Hilbert Analytic Envelope
-In [`AudioEngineService._compute_robust_correlation`](../services/audio_engine.py), Polifonia computes the **Hilbert Analytic Matched-Filter Envelope** in a single FFT/IFFT pass of size $N_{\text{fft}} = 2^{\lceil \log_2(N_{\text{rec}} + M - 1) \rceil}$:
+In [`src/engine.rs`](../src/engine.rs) (`compute_robust_correlation`), Polifonia computes the **Hilbert Analytic Matched-Filter Envelope** in a single `rustfft` single-precision (`f32`) FFT/IFFT pass of size $N_{\text{fft}} = 2^{\lceil \log_2(N_{\text{rec}} + M - 1) \rceil}$:
 
 1. Compute the forward FFTs of the zero-mean recorded signal $\tilde{y}$ and template $\tilde{s}$:
    $$Y[k] = \text{FFT}_{N_{\text{fft}}}(\tilde{y})[k], \qquad S[k] = \text{FFT}_{N_{\text{fft}}}(\tilde{s})[k]$$
@@ -133,7 +133,7 @@ The envelope $E[m]$ is therefore **mathematically invariant to any carrier phase
 ### 6.1 Late Room-Reflection Rejection (Precedence / Haas Effect)
 In indoor environments, a reflection off a desk or wall arriving $2\text{–}15\text{ ms}$ after the direct line-of-sight acoustic wave can exhibit a higher peak amplitude than the direct arrival due to constructive multipath interference.
 
-[`AudioEngineService._detect_first_arrival_peak`](../services/audio_engine.py) first locates the maximum $m_{\max}$ within the bounded physical window $[w_{\text{start},i}, w_{\text{end},i}]$ (strictly upper-bounded by the next speaker's emission timestamp $t_{\text{emit,rel},i+1}$ to prevent inter-probe cross-contamination) and then inspects the preceding interval $[m_{\max} - 15\text{ ms}, m_{\max} - 2\text{ ms}]$:
+[`src/engine.rs`](../src/engine.rs) (`detect_first_arrival_peak`) first locates the maximum $m_{\max}$ within the bounded physical window $[w_{\text{start},i}, w_{\text{end},i}]$ (strictly upper-bounded by the next speaker's emission timestamp $t_{\text{emit,rel},i+1}$ to prevent inter-probe cross-contamination) and then inspects the preceding interval $[m_{\max} - 15\text{ ms}, m_{\max} - 2\text{ ms}]$:
 - If an earlier peak $m_{\text{early}}$ satisfies:
   $$E[m_{\text{early}}] \ge \max\big(3.5 \, \mu_{\text{noise}}, \; 0.65 \, E[m_{\max}]\big)$$
 - and is separated from $m_{\max}$ by a distinct valley:
@@ -168,7 +168,7 @@ $$\delta_i = \begin{cases} 0.0\text{ ms} & \text{if } |\Delta\tau_{\text{res},i}
 
 ## 7. Audiophile DSP Pipeline, LR4 Crossover & Phase Alignment
 
-In [`backend/pipewire_config.py`](../backend/pipewire_config.py) and [`services/audio_engine.py`](../services/audio_engine.py):
+In [`src/engine.rs`](../src/engine.rs):
 1. **Audiophile Resampling (`resample.quality = 10`)**: All `pw-loopback` and `filter-chain` streams run at PipeWire's highest Kaiser-windowed sinc interpolation quality (64+ taps, $>100\text{ dB}$ stopband aliasing rejection).
 2. **Headroom Normalization (`channelmix.normalize = true`, `channelmix.upmix = true`)**: Prevents $+6\text{ dB}$ digital clipping when summing stereo channels into mono `CENTER` and `SUBWOOFER` feeds.
 3. **4th-Order Linkwitz-Riley ($24\text{ dB/oct}$, LR4) Active Crossover**:

@@ -18,3 +18,5 @@ dist/
 .idea/
 .vscode/
 *.swp
+/target
+target/
