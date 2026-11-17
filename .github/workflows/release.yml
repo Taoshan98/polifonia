@@ -119,7 +119,7 @@ jobs:
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
 
-          ARCH=x86_64 ./appimagetool --no-appstream --appimage-extract-and-run build/AppDir "dist/packages/Polifonia-${{ env.VERSION }}-x86_64.AppImage"
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 ./appimagetool --no-appstream build/AppDir "dist/packages/Polifonia-${{ env.VERSION }}-x86_64.AppImage"
 
       - name: Generate SHA256 Checksums
         run: |
