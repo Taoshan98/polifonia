@@ -39,7 +39,7 @@ pub struct PolifoniaTray {
     engine: Arc<AudioEngineService>,
     cmd_tx: mpsc::Sender<TrayCommand>,
     window_visible: Arc<AtomicBool>,
-    icon_pixmaps: Vec<Icon>,
+    icon_copper: Vec<Icon>,
 }
 
 impl PolifoniaTray {
@@ -74,11 +74,11 @@ impl Tray for PolifoniaTray {
     }
 
     fn icon_name(&self) -> String {
-        "audio-speakers".to_string()
+        "polifonia-studio-color".to_string()
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        self.icon_pixmaps.clone()
+        self.icon_copper.clone()
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
@@ -91,8 +91,8 @@ impl Tray for PolifoniaTray {
             .count();
         let status = if running { "ACTIVE" } else { "STANDBY" };
         ksni::ToolTip {
-            icon_name: "audio-speakers".to_string(),
-            icon_pixmap: Vec::new(),
+            icon_name: "polifonia-studio-color".to_string(),
+            icon_pixmap: self.icon_copper.clone(),
             title: "Polifonia Audio Studio".to_string(),
             description: format!(
                 "Unison {} • {} destination(s) • Master {}%",
@@ -251,6 +251,8 @@ impl Tray for PolifoniaTray {
                     (SpeakerRole::Right, "Right Front (R)"),
                     (SpeakerRole::Subwoofer, "Subwoofer (LFE)"),
                     (SpeakerRole::Center, "Center (C)"),
+                    (SpeakerRole::SurroundLeft, "Surround Left (SL)"),
+                    (SpeakerRole::SurroundRight, "Surround Right (SR)"),
                 ];
                 let selected_role = roles
                     .iter()
@@ -267,6 +269,8 @@ impl Tray for PolifoniaTray {
                                 SpeakerRole::Right,
                                 SpeakerRole::Subwoofer,
                                 SpeakerRole::Center,
+                                SpeakerRole::SurroundLeft,
+                                SpeakerRole::SurroundRight,
                             ];
                             if let Some(&role) = all_roles.get(idx) {
                                 this.send(TrayCommand::SetSpeakerRole(sn_role.clone(), role));
@@ -363,73 +367,16 @@ impl Tray for PolifoniaTray {
     }
 }
 
-/// Generate a crisp 32x32 ARGB32 icon programmatically so the binary requires no external runtime assets.
-fn build_tray_icon_pixmap() -> Vec<Icon> {
-    let size: i32 = 32;
-    let mut data = Vec::with_capacity((size * size * 4) as usize);
-    let cx = 15.5f32;
-    let cy = 15.5f32;
-
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let dist = (dx * dx + dy * dy).sqrt();
-
-            let mut a = 0u8;
-            let mut r = 0u8;
-            let mut g = 0u8;
-            let mut b = 0u8;
-
-            // Dark circular badge background
-            if dist <= 14.5 {
-                let edge = (14.5 - dist).clamp(0.0, 1.0);
-                a = (edge * 245.0) as u8;
-                r = 19;
-                g = 26;
-                b = 38;
-            }
-
-            // Outer cyan ring
-            if (dist - 12.2).abs() <= 1.1 {
-                let intensity = (1.1 - (dist - 12.2).abs()).clamp(0.0, 1.0);
-                a = a.max((intensity * 255.0) as u8);
-                r = ((1.0 - intensity) * r as f32 + intensity * 56.0) as u8;
-                g = ((1.0 - intensity) * g as f32 + intensity * 189.0) as u8;
-                b = ((1.0 - intensity) * b as f32 + intensity * 248.0) as u8;
-            }
-
-            // Mid concentric acoustic wave
-            if (dist - 7.6).abs() <= 1.05 {
-                let intensity = (1.05 - (dist - 7.6).abs()).clamp(0.0, 1.0);
-                a = a.max((intensity * 255.0) as u8);
-                r = ((1.0 - intensity) * r as f32 + intensity * 125.0) as u8;
-                g = ((1.0 - intensity) * g as f32 + intensity * 211.0) as u8;
-                b = ((1.0 - intensity) * b as f32 + intensity * 252.0) as u8;
-            }
-
-            // Center glowing core dot
-            if dist <= 3.2 {
-                let intensity = ((3.2 - dist) / 1.0).clamp(0.0, 1.0);
-                a = 255;
-                r = ((1.0 - intensity) * r as f32 + intensity * 56.0) as u8;
-                g = ((1.0 - intensity) * g as f32 + intensity * 224.0) as u8;
-                b = ((1.0 - intensity) * b as f32 + intensity * 248.0) as u8;
-            }
-
-            // Network byte order ARGB32
-            data.push(a);
-            data.push(r);
-            data.push(g);
-            data.push(b);
-        }
-    }
-
-    vec![Icon {
-        width: size,
-        height: size,
-        data,
-    }]
+/// Generate crisp multi-resolution ARGB32 icons programmatically so HiDPI panels sample cleanly.
+fn build_tray_icon_pixmap(copper_accent: bool) -> Vec<Icon> {
+    [24usize, 32, 64]
+        .into_iter()
+        .map(|size| Icon {
+            width: size as i32,
+            height: size as i32,
+            data: crate::icons::render_fader_matrix_icon(size, copper_accent, true),
+        })
+        .collect()
 }
 
 pub fn spawn_tray(
@@ -444,7 +391,7 @@ pub fn spawn_tray(
         engine,
         cmd_tx,
         window_visible,
-        icon_pixmaps: build_tray_icon_pixmap(),
+        icon_copper: build_tray_icon_pixmap(true),
     };
 
     thread::Builder::new()

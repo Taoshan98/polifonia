@@ -5,6 +5,7 @@ use crate::models::{AudioSink, SpeakerConfig, SpeakerRole, SystemConfig};
 use crate::scanner::{run_cmd, run_quiet, DeviceScanner, SinkInputInfo};
 use crate::storage::StorageService;
 use rustfft::{num_complex::Complex, FftPlanner};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::f32::consts::PI as PI32;
@@ -18,7 +19,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DestinationStatus {
     pub sink_id: u32,
     pub sink_name: String,
@@ -36,7 +37,7 @@ pub struct DestinationStatus {
     pub state: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RoutingStatus {
     pub is_unison_active: bool,
     pub master_volume: f64,

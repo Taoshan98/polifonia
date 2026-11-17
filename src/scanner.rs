@@ -1,6 +1,7 @@
 //! Inspects system ALSA hardware and PipeWire topology to classify audio sinks and client streams.
 
 use crate::models::AudioSink;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -18,7 +19,7 @@ pub struct EldMonitor {
     pub pin: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SinkInputInfo {
     pub id: String,
     pub sink_id: Option<u32>,
