@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. 1.0.5 or v1.0.5; leave empty for auto-detection)'
+        description: 'Release version (e.g. 2.0.0 or v2.0.0; leave empty for auto-detection)'
         required: false
         type: string
         default: ''
@@ -29,11 +29,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
       - name: Determine Release Version
         id: get_version
         run: |
@@ -42,72 +37,93 @@ jobs:
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             RAW_VER="${GITHUB_REF_NAME}"
           else
-            RAW_VER=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+            RAW_VER=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
           fi
-          
-          # Clean version without leading 'v' (e.g. 1.0.5)
+
+          # Clean version without leading 'v' (e.g. 2.0.0)
           VERSION="${RAW_VER#v}"
           TAG_NAME="v${VERSION}"
-          
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
-          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "TAG_NAME=${TAG_NAME}" >> "$GITHUB_ENV"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "Building Polifonia release version: ${VERSION} (Tag: ${TAG_NAME})"
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            python3-gi \
-            gir1.2-gtk-4.0 \
-            gir1.2-adw-1 \
-            libgirepository-2.0-dev \
-            libcairo2-dev \
+            build-essential \
             pkg-config \
-            libfuse2 \
+            libdbus-1-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libegl-dev \
+            libgl-dev \
+            desktop-file-utils \
+            appstream \
+            dpkg-dev \
             file \
-            wget \
-            dpkg-dev
+            wget
 
-      - name: Build Python Wheel & Source Dist
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Native Release Binary & Portable Archive
         run: |
-          python -m pip install --upgrade pip setuptools wheel build
-          pip install PyGObject
-          
-          # Ensure pyproject.toml has the matching release version and name
-          python3 -c "
-          import re
-          with open('pyproject.toml', 'r') as f:
-              content = f.read()
-          content = re.sub(r'name\s*=\s*\"[^\"]+\"', 'name = \"polifonia\"', content, count=1)
-          content = re.sub(r'version\s*=\s*\"[^\"]+\"', f'version = \"${{ env.VERSION }}\"', content, count=1)
-          with open('pyproject.toml', 'w') as f:
-              f.write(content)
-          "
-          
-          python -m build
+          python3 - <<'EOF'
+          import os, re
+          ver = os.environ["VERSION"]
+          with open("Cargo.toml", "r", encoding="utf-8") as f:
+              text = f.read()
+          text = re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{ver}"', text, count=1)
+          with open("Cargo.toml", "w", encoding="utf-8") as f:
+              f.write(text)
+          EOF
+
+          cargo test
+          cargo build --release
+
           mkdir -p dist/packages
-          cp dist/polifonia-${{ env.VERSION }}*.whl dist/polifonia-${{ env.VERSION }}*.tar.gz dist/packages/
+          STAGE_DIR="build/portable/Polifonia-${VERSION}-linux-x86_64"
+          rm -rf "build/portable"
+          mkdir -p "${STAGE_DIR}"
+          install -Dm755 target/release/polifonia "${STAGE_DIR}/polifonia"
+          install -Dm644 io.github.taoshan98.Polifonia.desktop "${STAGE_DIR}/io.github.taoshan98.Polifonia.desktop"
+          install -Dm644 io.github.taoshan98.Polifonia.metainfo.xml "${STAGE_DIR}/io.github.taoshan98.Polifonia.metainfo.xml"
+          install -Dm644 README.md "${STAGE_DIR}/README.md"
+          install -Dm644 LICENSE "${STAGE_DIR}/LICENSE"
+          cp -r assets "${STAGE_DIR}/assets"
+          tar -C "build/portable" -czf "dist/packages/Polifonia-${VERSION}-linux-x86_64.tar.gz" "Polifonia-${VERSION}-linux-x86_64"
 
       # Debian package build temporarily commented out while preparing dedicated PPA/APT repo
       # - name: Build Debian Package (.deb)
       #   run: |
       #     chmod +x packaging/debian/build_deb.sh
-      #     ./packaging/debian/build_deb.sh "${{ env.VERSION }}"
-      #     mv polifonia_${{ env.VERSION }}_all.deb dist/packages/
+      #     SKIP_CARGO_BUILD=1 ./packaging/debian/build_deb.sh "${{ env.VERSION }}"
+      #     mv "polifonia_${{ env.VERSION }}_amd64.deb" dist/packages/
 
       - name: Build AppImage (.AppImage)
         run: |
-          chmod +x packaging/appimage/build_appimage.sh
-          ./packaging/appimage/build_appimage.sh "${{ env.VERSION }}"
-          
-          # Download appimagetool
+          chmod +x packaging/appimage/build_appimage.sh packaging/appimage/AppRun
+          SKIP_CARGO_BUILD=1 ./packaging/appimage/build_appimage.sh "${{ env.VERSION }}"
+
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
-          
-          # Build final AppImage with reference version in the filename
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run build/AppDir "dist/packages/Polifonia-${{ env.VERSION }}-x86_64.AppImage"
+
+          ARCH=x86_64 ./appimagetool --no-appstream --appimage-extract-and-run build/AppDir "dist/packages/Polifonia-${{ env.VERSION }}-x86_64.AppImage"
+
+      - name: Generate SHA256 Checksums
+        run: |
+          (cd dist/packages && sha256sum * > SHA256SUMS.txt)
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4

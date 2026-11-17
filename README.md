@@ -62,22 +62,25 @@ Polifonia solves these challenges using a **100% hardware-agnostic, zero-hardcod
 
 ## Architecture & System Design
 
-Polifonia v2.0 is implemented as a compact, single-process native Rust application with an `eframe`/`egui` GPU-accelerated Studio UI, an integrated DBus StatusNotifier (`ksni`) system tray, and single-precision `rustfft` acoustic system identification:
+Polifonia v2.0 uses a **split-process daemon + `--ui-window` Unix-socket IPC architecture** (`$XDG_RUNTIME_DIR/polifonia-studio.sock`): the lightweight PipeWire engine and DBus StatusNotifier (`ksni`) tray daemon stay alive persistently in the background, while the `eframe`/`egui` GPU-accelerated Studio UI spawns on demand as `--ui-window` so closing the window tears down Wayland/X11/EGL surfaces cleanly with zero audio interruption:
 
 ```
 polifonia/
 ├── src/
-│   ├── main.rs        # Entrypoint, POSIX signal hooks, tray command dispatcher & eframe runner
+│   ├── main.rs        # Single-instance daemon, hotplug watcher, POSIX signal hooks & --ui-window lifecycle manager
+│   ├── ipc.rs         # Local Unix-domain JSON-line protocol ($XDG_RUNTIME_DIR/polifonia-studio.sock)
 │   ├── models.rs      # Strongly-typed domain models (AudioSink, SpeakerConfig, SpeakerRole, SystemConfig)
 │   ├── storage.rs     # Atomic XDG JSON profile store (~/.config/polifonia/current.json)
 │   ├── scanner.rs     # ELD/EDID display resolver, IEC958 unlocker & PipeWire pw-dump/pactl scanner
 │   ├── engine.rs      # Unison pw-loopback supervisor, drift watchdog & Hilbert Auto-Sync DSP engine
-│   ├── tray.rs        # Embedded DBus StatusNotifierItem (ksni) tray menu & synthesized ARGB32 icon
-│   └── ui.rs          # Studio Dark eframe/egui Mixer Console & Signal Flow topology canvas
-├── assets/            # Desktop & SVG application icons
+│   ├── tray.rs        # Embedded DBus StatusNotifierItem (ksni) tray menu & full-color Copper icon
+│   ├── theme.rs       # Matte Carbon & Studio Copper DAW design tokens, tactile faders & crisp geometry helpers
+│   ├── icons.rs       # Procedural Polyphonic Fader Matrix emblem, hardware bus badges & ARGB32 tray icon generator
+│   └── ui.rs          # GPU-accelerated --ui-window IPC client: Console Mixer DAW, Compact Rack & Signal Flow canvas
+├── assets/            # Desktop & SVG application icons (Polyphonic Fader Matrix)
 ├── docs/
 │   └── ALGORITHMS_AND_ARCHITECTURE.md  # Full mathematical & algorithmic specification
-├── packaging/         # Flatpak, AppImage, Debian (.deb) & RPM specs
+├── packaging/         # Flatpak, AppImage, Debian (.deb), RPM & AUR specs
 ├── Cargo.toml         # Rust crate configuration & LTO release profile
 └── README.md
 ```
@@ -95,7 +98,8 @@ polifonia/
   - Modifying the delay or phase of one speaker restarts **only** the affected `pw-loopback` branch, leaving all other speakers playing without a single dropped sample.
 
 ### 3. Interactive Live Routing Graph & Studio UI
-- **Mixer Console & Signal Flow Canvas**: Renders live active application streams (`sink-inputs`) flowing into `polifonia_master` and branching out to each physical speaker with real-time hardware latency, auto-delay compensation, manual offset, and hover telemetry, with 30 FPS throttled animation strictly confined to when Signal Flow is visible and active (`0%` idle redraw cost).
+- **Matte Carbon & Studio Copper DAW Console**: Features the **Polyphonic Fader Matrix** emblem, precision channel strips (`theme.rs` / `ui.rs`), **Compact Rack** view plus live search & active-only filtering for high-device-count setups, and crisp halo-free custom rendering.
+- **Signal Flow Canvas**: Renders live active application streams (`sink-inputs`) flowing into `polifonia_master` and branching out to each physical speaker with real-time hardware latency, auto-delay compensation, manual offset, and hover telemetry, with throttled animation strictly confined to when Signal Flow is visible and active (`0%` idle redraw cost).
 
 ---
 
@@ -201,10 +205,26 @@ sudo pacman -S pipewire pipewire-pulse wireplumber libpulse
 ```
 
 ### Building & Running from Source (Rust 1.75+)
+
+Install the native build toolchain headers (`pkg-config`, `D-Bus`, and `Wayland`/`X11`/`EGL` development packages):
+
+```bash
+# Debian / Ubuntu build dependencies
+sudo apt install build-essential pkg-config libdbus-1-dev libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libegl-dev libgl-dev
+
+# Fedora / RHEL build dependencies
+sudo dnf install gcc pkgconf-pkg-config dbus-devel wayland-devel libxkbcommon-devel libX11-devel libXcursor-devel libXi-devel libXrandr-devel mesa-libEGL-devel mesa-libGL-devel
+
+# Arch Linux build dependencies
+sudo pacman -S base-devel pkgconf dbus wayland libxkbcommon libx11 libxcursor libxi libxrandr libglvnd
+```
+
+Then clone, compile, and launch:
+
 ```bash
 git clone https://github.com/Taoshan98/polifonia.git
 cd polifonia
-cargo build --release
+cargo build --release --locked
 ./target/release/polifonia
 ```
 
@@ -247,7 +267,7 @@ To build locally:
 ```bash
 ./packaging/appimage/build_appimage.sh
 # Generate bundle using appimagetool:
-appimagetool build/AppDir Polifonia-x86_64.AppImage
+ARCH=x86_64 appimagetool --no-appstream build/AppDir Polifonia-x86_64.AppImage
 ```
 
 ---

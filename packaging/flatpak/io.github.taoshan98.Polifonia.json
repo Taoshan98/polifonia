@@ -1,8 +1,11 @@
 {
   "app-id": "io.github.taoshan98.Polifonia",
-  "runtime": "org.gnome.Platform",
-  "runtime-version": "47",
-  "sdk": "org.gnome.Sdk",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "24.08",
+  "sdk": "org.freedesktop.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable"
+  ],
   "command": "polifonia",
   "finish-args": [
     "--share=ipc",
@@ -11,14 +14,22 @@
     "--socket=pulseaudio",
     "--filesystem=xdg-run/pipewire-0",
     "--filesystem=xdg-config/polifonia:create",
+    "--talk-name=org.kde.StatusNotifierWatcher",
     "--device=all"
   ],
   "modules": [
     {
       "name": "polifonia",
       "buildsystem": "simple",
+      "build-options": {
+        "append-path": "/usr/lib/sdk/rust-stable/bin",
+        "build-args": [
+          "--share=network"
+        ]
+      },
       "build-commands": [
-        "pip3 install --no-index --find-links=\"file://${PWD}\" --prefix=${FLATPAK_DEST} .",
+        "cargo build --release --locked",
+        "install -Dm755 target/release/polifonia ${FLATPAK_DEST}/bin/polifonia",
         "install -Dm644 io.github.taoshan98.Polifonia.desktop ${FLATPAK_DEST}/share/applications/io.github.taoshan98.Polifonia.desktop",
         "install -Dm644 assets/io.github.taoshan98.Polifonia.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.taoshan98.Polifonia.svg",
         "install -Dm644 assets/io.github.taoshan98.Polifonia-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.taoshan98.Polifonia-symbolic.svg",

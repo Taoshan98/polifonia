@@ -1,10 +1,12 @@
 Package: polifonia
 Section: sound
 Priority: optional
-Architecture: all
+Architecture: amd64
 Maintainer: Polifonia Contributors <info@polifonia.io>
 Homepage: https://github.com/Taoshan98/polifonia
-Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, pipewire, pipewire-pulse, wireplumber, pulseaudio-utils
+Depends: libc6 (>= 2.34), libdbus-1-3, libwayland-client0 | libx11-6, libxkbcommon0, libegl1, pipewire, pipewire-pulse, pipewire-bin, wireplumber, pulseaudio-utils
 Description: Multi-Speaker & Multi-Monitor Audio Unison Engine for Linux
- Polifonia allows broadcasting synchronized audio to multiple
- monitor displays, USB sound cards, and speakers via PipeWire.
+ Polifonia Audio Studio is a native Rust PipeWire audio compositing and
+ acoustic synchronization studio console that broadcasts phase-aligned,
+ latency-compensated audio simultaneously across monitors, USB DACs,
+ S/PDIF receivers, Bluetooth A2DP, and network speakers.

@@ -1,49 +1,52 @@
 #!/usr/bin/env bash
-# Polifonia - Debian / Ubuntu Package Builder
-set -e
+# Polifonia - Debian / Ubuntu Package Builder (Rust Native v2.0+)
+set -euo pipefail
 
-VERSION="${1:-${VERSION:-1.0.5}}"
-PKG_DIR="build/debian_pkg"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${ROOT_DIR}"
 
-echo "=== Building Polifonia Debian Package (${VERSION}) ==="
+DEFAULT_VER="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+VERSION="${1:-${VERSION:-${DEFAULT_VER:-2.0.0}}}"
+DEB_ARCH="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+PKG_DIR="build/debian_pkg"
+OUT_DEB="polifonia_${VERSION}_${DEB_ARCH}.deb"
+
+echo "=== Building Polifonia Debian Package (${VERSION}, ${DEB_ARCH}) ==="
+
+if [ "${SKIP_CARGO_BUILD:-0}" != "1" ]; then
+  cargo build --release
+fi
+
+if [ ! -x "target/release/polifonia" ]; then
+  echo "Error: target/release/polifonia not found or not executable." >&2
+  exit 1
+fi
+
 rm -rf "${PKG_DIR}"
-mkdir -p "${PKG_DIR}/DEBIAN"
-mkdir -p "${PKG_DIR}/usr/bin"
-mkdir -p "${PKG_DIR}/usr/lib/polifonia"
-mkdir -p "${PKG_DIR}/usr/share/applications"
-mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps"
-mkdir -p "${PKG_DIR}/usr/share/metainfo"
-mkdir -p "${PKG_DIR}/usr/share/doc/polifonia"
+mkdir -p \
+  "${PKG_DIR}/DEBIAN" \
+  "${PKG_DIR}/usr/bin" \
+  "${PKG_DIR}/usr/share/applications" \
+  "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps" \
+  "${PKG_DIR}/usr/share/metainfo" \
+  "${PKG_DIR}/usr/share/doc/polifonia"
 
-# Copy debian control file
-cp "${ROOT_DIR}/packaging/debian/control" "${PKG_DIR}/DEBIAN/"
+# Prepare DEBIAN/control with resolved architecture and version
+sed "s/^Architecture:.*/Architecture: ${DEB_ARCH}/" "packaging/debian/control" > "${PKG_DIR}/DEBIAN/control"
 echo "Version: ${VERSION}" >> "${PKG_DIR}/DEBIAN/control"
 
-# Copy source files to /usr/lib/polifonia
-cp -r "${ROOT_DIR}/core" "${PKG_DIR}/usr/lib/polifonia/"
-cp -r "${ROOT_DIR}/backend" "${PKG_DIR}/usr/lib/polifonia/"
-cp -r "${ROOT_DIR}/services" "${PKG_DIR}/usr/lib/polifonia/"
-cp -r "${ROOT_DIR}/storage" "${PKG_DIR}/usr/lib/polifonia/"
-cp -r "${ROOT_DIR}/ui" "${PKG_DIR}/usr/lib/polifonia/"
-cp "${ROOT_DIR}/main.py" "${PKG_DIR}/usr/lib/polifonia/"
+# Install compiled native Rust binary directly to /usr/bin/polifonia
+install -Dm755 "target/release/polifonia" "${PKG_DIR}/usr/bin/polifonia"
 
-# Create executable launcher in /usr/bin/polifonia
-cat << 'EOF' > "${PKG_DIR}/usr/bin/polifonia"
-#!/usr/bin/env bash
-export GSK_RENDERER="gl"
-exec python3 /usr/lib/polifonia/main.py "$@"
-EOF
-chmod 755 "${PKG_DIR}/usr/bin/polifonia"
-
-# Copy desktop launcher and icons
-cp "${ROOT_DIR}/io.github.taoshan98.Polifonia.desktop" "${PKG_DIR}/usr/share/applications/"
-cp "${ROOT_DIR}/assets/io.github.taoshan98.Polifonia.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
-cp "${ROOT_DIR}/assets/io.github.taoshan98.Polifonia-symbolic.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/"
-cp "${ROOT_DIR}/io.github.taoshan98.Polifonia.metainfo.xml" "${PKG_DIR}/usr/share/metainfo/" 2>/dev/null || true
-cp "${ROOT_DIR}/README.md" "${PKG_DIR}/usr/share/doc/polifonia/"
-cp "${ROOT_DIR}/LICENSE" "${PKG_DIR}/usr/share/doc/polifonia/copyright"
+# Copy desktop launcher, AppStream metadata, icons, and documentation
+install -Dm644 "io.github.taoshan98.Polifonia.desktop" "${PKG_DIR}/usr/share/applications/io.github.taoshan98.Polifonia.desktop"
+install -Dm644 "assets/io.github.taoshan98.Polifonia.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/io.github.taoshan98.Polifonia.svg"
+install -Dm644 "assets/io.github.taoshan98.Polifonia-symbolic.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/io.github.taoshan98.Polifonia-symbolic.svg"
+install -Dm644 "assets/io.github.taoshan98.Polifonia.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/polifonia-studio-color.svg"
+install -Dm644 "io.github.taoshan98.Polifonia.metainfo.xml" "${PKG_DIR}/usr/share/metainfo/io.github.taoshan98.Polifonia.metainfo.xml"
+install -Dm644 "README.md" "${PKG_DIR}/usr/share/doc/polifonia/README.md"
+install -Dm644 "LICENSE" "${PKG_DIR}/usr/share/doc/polifonia/copyright"
 
 # Build .deb package
-dpkg-deb --build "${PKG_DIR}" "polifonia_${VERSION}_all.deb"
-echo "Debian package successfully built: polifonia_${VERSION}_all.deb"
+dpkg-deb --build "${PKG_DIR}" "${OUT_DEB}"
+echo "Debian package successfully built: ${OUT_DEB}"

@@ -23,8 +23,8 @@
       <li>Universal hardware discovery for HDMI/DP displays, USB DACs, S/PDIF, Bluetooth A2DP, and Network/AirPlay sinks</li>
       <li>Two-level hardware-agnostic synchronization: real-time PipeWire SPA telemetry plus closed-loop microphone Auto-Sync using FFT Hilbert analytic cross-correlation</li>
       <li>Active 4th-order Linkwitz-Riley (24 dB/oct) acoustic crossover DSP, audiophile resampling, and 180-degree phase inversion</li>
-      <li>Interactive Cairo live routing graph and studio mixing console UI built with GTK4 and Libadwaita</li>
-      <li>System tray companion indicator for quick volume control and unison toggle</li>
+      <li>GPU-accelerated Matte Carbon and Studio Copper DAW mixing console, Compact Rack multi-device layout, and live Signal Flow routing graph built natively in Rust (eframe/egui)</li>
+      <li>Full-color StatusNotifier system tray companion with isolated background audio daemon</li>
     </ul>
   </description>
 
@@ -46,6 +46,11 @@
   </screenshots>
 
   <releases>
+    <release version="2.0.0" date="2026-11-15">
+      <description>
+        <p>Complete native Rust v2.0 rewrite with GPU-accelerated eframe/egui Matte Carbon &amp; Studio Copper DAW mixing console, Compact Rack view for large speaker setups, Polyphonic Fader Matrix iconography, and split-process daemon + --ui-window Unix-socket IPC lifecycle.</p>
+      </description>
+    </release>
     <release version="1.1.0" date="2026-10-14">
       <description>
         <p>Added hardware-agnostic closed-loop acoustic Auto-Sync (FFT Hilbert analytic cross-correlation and sub-sample parabolic interpolation), real-time PipeWire ProcessLatency telemetry, 4th-order Linkwitz-Riley crossover, 180-degree phase inversion, and S/PDIF and Network sink support.</p>

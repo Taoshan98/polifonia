@@ -71,7 +71,7 @@ The background supervisor thread (`watchdog` loop in [`src/engine.rs`](../src/en
 When a speaker contains an unreported internal DSP buffer ($\tau_{\text{dsp},i} \neq 0$) or sits at a different physical distance from the listener ($\tau_{\text{air},i} \neq \tau_{\text{air,ref}}$), protocol telemetry alone cannot observe the hidden delay. `AudioEngineService.auto_align_all_speakers` performs **Closed-Loop Acoustic System Identification** using the system microphone.
 
 ### 4.1 Common-Clock Virtual Sink Injection (Eliminating Spawn Jitter)
-Spawning `pw-play --target=<physical_sink>` directly against individual hardware endpoints introduces $20\text{–}180\text{ ms}$ of target-dependent process-fork and BlueZ/ALSA socket negotiation jitter between the Python `time.time()` call and actual PCM emission.
+Spawning `pw-play --target=<physical_sink>` directly against individual hardware endpoints introduces $20\text{–}180\text{ ms}$ of target-dependent process-fork and BlueZ/ALSA socket negotiation jitter between the userspace `Instant::now()` timestamp and actual PCM emission.
 
 Polifonia eliminates this error by keeping the **live `polifonia_master` $\rightarrow$ `pw-loopback` graph running** throughout calibration:
 1. External desktop application streams (`sink-inputs`) are temporarily muted (`pactl set-sink-input-mute <id> 1`) so background media cannot contaminate the microphone recording.
@@ -176,3 +176,17 @@ In [`src/engine.rs`](../src/engine.rs):
    - Both branches have a magnitude response of $-6.02\text{ dB}$ ($0.5$ linear gain).
    - Both branches are completely in phase ($0^\circ / 360^\circ$), guaranteeing a flat $0\text{ dB}$ acoustic sum ($0.5 + 0.5 = 1.0$) with zero phase cancellation around $f_c$.
 4. **$180^\circ$ Polarity Inversion (`Ø`) & Multichannel Spatial Routing**: Each speaker supports polarity inversion (`phase_inverted`) and spatial role routing for `STEREO`, `LEFT` (`FL`), `RIGHT` (`FR`), `CENTER` (`FC`), `SUBWOOFER` (`LFE`), `SURROUND_LEFT` (`RL`), and `SURROUND_RIGHT` (`RR`).
+
+---
+
+## 8. Split-Process Daemon & Wayland/EGL Lifecycle Isolation
+
+To guarantee glitch-free PipeWire unison routing and instant close-to-tray behavior on Wayland and X11 compositors without stalling `xdg_wm_base.ping` or holding orphaned EGL contexts, Polifonia v2.0 separates the real-time control plane from the GPU frontend:
+
+1. **Persistent Background Daemon ([`src/main.rs`](../src/main.rs))**:
+   - Owns the `AudioEngineService`, `spawn_hotplug_watcher` thread, acoustic Auto-Sync calibration workers, POSIX signal handlers, and DBus `StatusNotifierItem` tray controller ([`src/tray.rs`](../src/tray.rs)).
+   - Enforces single-instance operation by listening on a local Unix-domain socket at `$XDG_RUNTIME_DIR/polifonia-studio.sock` (falling back to `/tmp/polifonia-studio-<uid>.sock`). Re-invoking `polifonia` forwards `IpcRequest::ShowWindow` to the active daemon and exits cleanly.
+2. **Ephemeral `--ui-window` Client ([`src/ui.rs`](../src/ui.rs), [`src/ipc.rs`](../src/ipc.rs))**:
+   - Spawned on demand by `UiWindowProcessManager` with `--ui-window`.
+   - Synchronizes snapshots (`DaemonStateSnapshot`) and dispatches mixer/routing commands over JSON-line IPC via `send_request`.
+   - Closing the Studio window triggers `close_to_tray()`, sending `IpcRequest::NotifyWindowClosing` and exiting immediately (`std::process::exit(0)`), allowing the kernel to tear down the `wl_display`/EGL buffers cleanly while PipeWire playback and the tray daemon continue uninterrupted.
